@@ -448,7 +448,7 @@ class TestCmdClearInheritance(Base):
 
 
 class TestCmdHistory(Base):
-    """pomo history — today's session timeline."""
+    """pomo history — session timeline with filters."""
 
     @patch.object(common, "get_sessions", return_value=[])
     def test_history_human_output(self, get_sessions_mock, capsys):
@@ -460,16 +460,12 @@ class TestCmdHistory(Base):
         # When: pomo history is called
         pomo.cmd_history()
         output = capsys.readouterr().out
-        # Then: output contains expected date, icon, name, duration, and time range
+        # Then: output contains inline date, icon, name, duration, and time range
         expected_date = datetime.fromtimestamp(int(now)).strftime("%Y-%m-%d")
         expected_start = datetime.fromtimestamp(int(now)).strftime("%H:%M")
         expected_end = datetime.fromtimestamp(int(now + 25 * 60)).strftime("%H:%M")
-        assert expected_date in output
-        assert "🍅" in output
-        assert "[fix-auth]" in output
-        assert "25:00" in output
-        assert expected_start in output
-        assert expected_end in output
+        expected_row = f"{expected_date}  {expected_start} – {expected_end}  🍅  25:00 [fix-auth]"
+        assert expected_row in output
 
     @patch.object(common, "get_sessions")
     def test_history_json_output(self, get_sessions_mock, capsys):
@@ -489,7 +485,7 @@ class TestCmdHistory(Base):
         # When: pomo history is called
         pomo.cmd_history()
         # Then: empty message shown
-        assert "No sessions today" in capsys.readouterr().out
+        assert "No sessions" in capsys.readouterr().out
 
     @patch.object(common, "get_sessions", side_effect=common.ServerUnavailable("offline"))
     def test_history_offline_errors(self, _mock, capsys):
@@ -505,9 +501,14 @@ class TestCmdHistory(Base):
         get_sessions_mock.return_value = []
         # When: pomo history --project website is called
         pomo.cmd_history(project="website")
-        # Then: get_sessions was called with project filter
-        get_sessions_mock.assert_called_once()
-        assert get_sessions_mock.call_args[1]["project"] == "website"
+        # Then: get_sessions was called with project filter and default None for others
+        get_sessions_mock.assert_called_once_with(
+            common.load_config()["server_url"],
+            project="website",
+            from_date=None,
+            to_date=None,
+            state=None,
+        )
 
     @patch.object(common, "get_sessions", return_value=[])
     def test_history_with_project_in_output(self, get_sessions_mock, capsys):
@@ -521,6 +522,46 @@ class TestCmdHistory(Base):
         output = capsys.readouterr().out
         # Then: project is shown in output
         assert "[website]" in output
+
+    @patch.object(common, "get_sessions")
+    def test_history_passes_from_to_state(self, get_sessions_mock, capsys):
+        # Given: mock that returns empty list
+        get_sessions_mock.return_value = []
+        server_url = common.load_config()["server_url"]
+        # When: pomo history with all new filters is called
+        pomo.cmd_history(
+            from_date="2026-08-01",
+            to_date="2026-08-07",
+            state="ended",
+        )
+        # Then: get_sessions was called with all filters forwarded
+        get_sessions_mock.assert_called_once_with(
+            server_url,
+            project=None,
+            from_date="2026-08-01",
+            to_date="2026-08-07",
+            state="ended",
+        )
+
+    @patch.object(common, "get_sessions", return_value=[])
+    def test_history_inline_date_format(self, get_sessions_mock, capsys):
+        # Given: two sessions on different days
+        now = 1722520000.0
+        s1 = common.new_session("pomodoro", int(now), 25 * 60, "laptop")
+        s1["ended_at"] = now + 25 * 60
+        s2 = common.new_session("break", int(now + 86400), 5 * 60, "laptop")
+        s2["ended_at"] = now + 86400 + 5 * 60
+        get_sessions_mock.return_value = [s1, s2]
+        # When: pomo history is called
+        pomo.cmd_history()
+        output = capsys.readouterr().out
+        lines = output.strip().split("\n")
+        # Then: each row has its own date, no standalone date header line
+        assert len(lines) == 2
+        assert lines[0].startswith(datetime.fromtimestamp(int(now)).strftime("%Y-%m-%d"))
+        assert lines[1].startswith(datetime.fromtimestamp(int(now + 86400)).strftime("%Y-%m-%d"))
+        # Then: no standalone date header (a line containing only a date would
+        # be caught by checking there are exactly 2 lines, not 3)
 
 
 class TestCmdProjects(Base):

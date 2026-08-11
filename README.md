@@ -54,14 +54,24 @@ pomo status --json
 
 ```sh
 pomo history
-# 2026-08-01
-#   09:14 – 09:39  🍅  25:00  [website]
-#   09:42 – 10:12  🍅  30:09  [website] [fix login]
-#   10:15 – 10:20  ☕  05:00  [website]
+# 2026-08-01  09:14 – 09:39  🍅  25:00  [website]
+# 2026-08-01  09:42 – 10:12  🍅  30:09  [website] [fix login]
+# 2026-08-01  10:15 – 10:20  ☕  05:00  [website]
 
-pomo history --project website       # filter by project
-pomo history --json                  # machine-readable
+pomo history --from 2026-08-01                    # from date to now
+pomo history --from 2026-08-01 --to 2026-08-07    # date range
+pomo history --state ended                        # only completed sessions
+pomo history --project website --state pomodoro   # combine filters
+pomo history --json                               # machine-readable
 ```
+
+| Flag | Description |
+|---|---|
+| `--from DATE` | Start date (YYYY-MM-DD) |
+| `--to DATE` | End date (YYYY-MM-DD) |
+| `--state STATE` | Filter by session state (`pomodoro`, `overtime`, `break`, `break-overtime`, `ended`, `archived`) |
+| `--json` | Output as JSON |
+| `-p`, `--project` | Filter by project |
 
 ### Projects
 
@@ -226,7 +236,7 @@ in `agent.toml.sample`.
 | GET    | `/health`       | `{"ok": true}`                             |
 | GET    | `/version`      | `{"version": "0.1.0"}`                     |
 | GET    | `/current`      | Current session or `{"state": "idle"}`     |
-| GET    | `/sessions`     | Today's sessions (optional `?project=`)     |
+| GET    | `/sessions`     | Sessions (optional `?project=`, `?from=`, `?to=`, `?state=`) |
 | GET    | `/projects`     | All defined project names                   |
 | POST   | `/sessions`     | Upsert a session (LWW)                      |
 | POST   | `/sessions/end` | End the current session                     |

@@ -226,10 +226,22 @@ def cmd_status(json_output: bool = False) -> None:
         print(display)
 
 
-def cmd_history(json_output: bool = False, project: str | None = None) -> None:
+def cmd_history(
+    json_output: bool = False,
+    project: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    state: str | None = None,
+) -> None:
     cfg = _cfg()
     try:
-        sessions = common.get_sessions(cfg["server_url"], project=project)
+        sessions = common.get_sessions(
+            cfg["server_url"],
+            project=project,
+            from_date=from_date,
+            to_date=to_date,
+            state=state,
+        )
     except common.ServerUnavailable:
         sys.stderr.write("Error: server unavailable\n")
         sys.exit(1)
@@ -239,15 +251,13 @@ def cmd_history(json_output: bool = False, project: str | None = None) -> None:
         return
 
     if not sessions:
-        print("No sessions today.")
+        print("No sessions.")
         return
 
     icon_map = {
         "pomodoro": "🍅",
         "break": "☕",
     }
-    date_str = datetime.fromtimestamp(int(sessions[0]["start_epoch"])).strftime("%Y-%m-%d")
-    print(date_str)
     for s in sessions:
         icon = icon_map.get(s.get("kind") or "", "")
         dur = _fmt_time(max(0, int((s.get("ended_at") or time.time()) - int(s["start_epoch"]))))
@@ -259,10 +269,11 @@ def cmd_history(json_output: bool = False, project: str | None = None) -> None:
         if name:
             label_parts.append(f"[{name}]")
         label_str = " " + " ".join(label_parts) if label_parts else ""
+        date_str = datetime.fromtimestamp(int(s["start_epoch"])).strftime("%Y-%m-%d")
         start_str = datetime.fromtimestamp(int(s["start_epoch"])).strftime("%H:%M")
         end_epoch = s.get("ended_at") or time.time()
         end_str = datetime.fromtimestamp(int(end_epoch)).strftime("%H:%M")
-        print(f"  {start_str} – {end_str}  {icon}  {dur}{label_str}")
+        print(f"{date_str}  {start_str} – {end_str}  {icon}  {dur}{label_str}")
 
 
 def cmd_projects(json_output: bool = False) -> None:
@@ -308,9 +319,12 @@ def _argparser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
     p = sub.add_parser("status", help="Show current session status")
     p.add_argument("--json", action="store_true", help="Output as JSON")
 
-    p = sub.add_parser("history", help="Show today's session history")
+    p = sub.add_parser("history", help="Show session history")
     p.add_argument("--json", action="store_true", help="Output as JSON")
     p.add_argument("-p", "--project", help="Filter by project")
+    p.add_argument("--from", dest="from_date", metavar="DATE", help="Start date (YYYY-MM-DD)")
+    p.add_argument("--to", dest="to_date", metavar="DATE", help="End date (YYYY-MM-DD)")
+    p.add_argument("--state", choices=common.ALL_STATES, help="Filter by session state")
 
     p = sub.add_parser("projects", help="List all defined projects")
     p.add_argument("--json", action="store_true", help="Output as JSON")
@@ -354,7 +368,13 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "status":
         cmd_status(json_output=args.json)
     elif args.command == "history":
-        cmd_history(json_output=args.json, project=args.project)
+        cmd_history(
+            json_output=args.json,
+            project=args.project,
+            from_date=args.from_date,
+            to_date=args.to_date,
+            state=args.state,
+        )
     elif args.command == "projects":
         cmd_projects(json_output=args.json)
     elif args.command == "service":

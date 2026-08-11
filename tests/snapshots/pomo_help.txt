@@ -9,7 +9,7 @@ positional arguments:
     break               Start a break for N minutes
     clear               Stop current session, optionally start a break
     status              Show current session status
-    history             Show today's session history
+    history             Show session history
     projects            List all defined projects
     service             Manage pomo processes
 

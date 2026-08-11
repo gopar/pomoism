@@ -305,10 +305,25 @@ def post_end(server_url: str, session: dict) -> dict:
     return cast(dict, _request("POST", server_url.rstrip("/") + "/sessions/end", session))
 
 
-def get_sessions(server_url: str, project: str | None = None) -> list:
+def get_sessions(
+    server_url: str,
+    project: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    state: str | None = None,
+) -> list:
+    params = {}
+    if project is not None:
+        params["project"] = project
+    if from_date is not None:
+        params["from"] = from_date
+    if to_date is not None:
+        params["to"] = to_date
+    if state is not None:
+        params["state"] = state
     url = server_url.rstrip("/") + "/sessions"
-    if project:
-        url += "?" + urllib.parse.urlencode({"project": project})
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
     return cast(list, _request("GET", url))
 
 

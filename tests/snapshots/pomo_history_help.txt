@@ -1,7 +1,12 @@
-usage: pomo history [-h] [--json] [-p PROJECT]
+usage: pomo history [-h] [--json] [-p PROJECT] [--from DATE] [--to DATE]
+                    [--state {pomodoro,overtime,break,break-overtime,ended,archived}]
 
 options:
   -h, --help            show this help message and exit
   --json                Output as JSON
   -p, --project PROJECT
                         Filter by project
+  --from DATE           Start date (YYYY-MM-DD)
+  --to DATE             End date (YYYY-MM-DD)
+  --state {pomodoro,overtime,break,break-overtime,ended,archived}
+                        Filter by session state
