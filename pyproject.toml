@@ -5,6 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "pomoism"
 version = "0.1.0"
+authors = [
+  { name="Gopar", email="danielgopar@gmail.com" },
+]
 description = "A multi-machine pomodoro timer that syncs via a home-base server."
 requires-python = ">=3.11"
 license = {text = "MIT"}
