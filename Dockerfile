@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 
 # Stdlib only — no pip install. Copy the pomo package.
 WORKDIR /app
-COPY pomo/ ./pomo/
+COPY src/pomo/ ./pomo/
 
 ENV POMO_DB_PATH=/data/pomo.db \
     POMO_HOST=0.0.0.0 \

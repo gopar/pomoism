@@ -39,11 +39,11 @@ pomo-agent = "pomo.agent:main"
 pomo-server = "pomo.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pomo"]
+packages = ["src/pomo"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "pomo/",
+    "src/pomo/",
     "hooks/examples/",
 ]
 
@@ -67,7 +67,7 @@ ignore = ["N818"]  # exception class names (ServerUnavailable is fine)
 known-first-party = ["pomo"]
 
 [tool.ruff.lint.per-file-ignores]
-"pomo/*.py" = ["UP036"]  # version guard for 3.11+ is intentional
+"src/pomo/*.py" = ["UP036"]  # version guard for 3.11+ is intentional
 "pomo/server.py" = ["N802"]  # do_GET/do_POST are stdlib overrides
 "tests/*.py" = ["SIM117"]  # nested with
 

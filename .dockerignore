@@ -8,8 +8,8 @@ __pycache__
 launchd
 systemd
 hooks
-agent.py
-pomo.py
+src/pomo/agent.py
+src/pomo/pomo.py
 agent.toml.sample
 README.md
 AGENTS.md
