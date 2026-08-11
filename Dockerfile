@@ -11,6 +11,9 @@
 # restarts. Set POMO_TOKEN to require bearer auth.
 FROM python:3.12-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 # Stdlib only — no pip install. Copy the pomo package.
 WORKDIR /app
 COPY pomo/ ./pomo/

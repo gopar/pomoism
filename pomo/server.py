@@ -234,16 +234,20 @@ def get_sessions(
         params: list = []
 
         if from_date is not None:
-            where.append("date(s.start_epoch, 'unixepoch') >= ?")
+            where.append("date(s.start_epoch, 'unixepoch', 'localtime') >= ?")
             params.append(from_date)
         else:
-            where.append("date(s.start_epoch, 'unixepoch') >= date('now')")
+            where.append(
+                "date(s.start_epoch, 'unixepoch', 'localtime') >= date('now', 'localtime')"
+            )
 
         if to_date is not None:
-            where.append("date(s.start_epoch, 'unixepoch') <= ?")
+            where.append("date(s.start_epoch, 'unixepoch', 'localtime') <= ?")
             params.append(to_date)
         elif from_date is None:
-            where.append("date(s.start_epoch, 'unixepoch') <= date('now')")
+            where.append(
+                "date(s.start_epoch, 'unixepoch', 'localtime') <= date('now', 'localtime')"
+            )
 
         if project is not None:
             where.append("s.project = ?")
@@ -308,16 +312,18 @@ def get_stats(
         params: list = []
 
         if from_date is not None:
-            where.append("date(s.start_epoch, 'unixepoch') >= ?")
+            where.append("date(s.start_epoch, 'unixepoch', 'localtime') >= ?")
             params.append(from_date)
         else:
-            where.append("date(s.start_epoch, 'unixepoch') = date('now')")
+            where.append("date(s.start_epoch, 'unixepoch', 'localtime') = date('now', 'localtime')")
 
         if to_date is not None:
-            where.append("date(s.start_epoch, 'unixepoch') <= ?")
+            where.append("date(s.start_epoch, 'unixepoch', 'localtime') <= ?")
             params.append(to_date)
         elif from_date is None:
-            where.append("date(s.start_epoch, 'unixepoch') <= date('now')")
+            where.append(
+                "date(s.start_epoch, 'unixepoch', 'localtime') <= date('now', 'localtime')"
+            )
 
         if project is not None:
             where.append("s.project = ?")

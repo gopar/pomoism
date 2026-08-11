@@ -13,6 +13,9 @@ services:
     volumes:
       - pomo-data:/data
     environment:
+      # Set to your local timezone so "today" queries match your clock.
+      # Find your zone: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+      TZ: "America/Los_Angeles"
       POMO_HOST: "0.0.0.0"
       POMO_PORT: "8787"
       # Uncomment to require a bearer token (also set it on every agent):
