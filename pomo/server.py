@@ -339,7 +339,8 @@ def get_stats(
         inner_where = " AND ".join(inner_parts).replace("s.", "") if inner_parts else "1=1"
         inner_params = [p for w, p in zip(where, params, strict=False) if "archived" not in w]
         sql = (
-            "SELECT s.id, s.state, s.duration, s.project, s.start_epoch FROM sessions s "
+            "SELECT s.id, s.state, s.duration, s.project, s.start_epoch, "
+            "s.ended_at FROM sessions s "
             "INNER JOIN ("
             "  SELECT id, MAX(updated_at) AS max_updated "
             "  FROM sessions "
@@ -355,6 +356,10 @@ def get_stats(
     projects: dict[str, dict] = {}
     for r in rows:
         dur = int(r["duration"])
+        ended_at = r["ended_at"]
+        start_epoch = int(r["start_epoch"])
+        if ended_at is not None and float(ended_at) > start_epoch:
+            dur = int(float(ended_at) - start_epoch)
         state = r["state"]
         proj = r["project"] or ""
         if state == "ended" or include_archived and state == "archived":

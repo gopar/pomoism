@@ -70,10 +70,8 @@ def _fmt_time(seconds: int) -> str:
 def _fmt_duration(seconds: int) -> str:
     h = seconds // 3600
     m = (seconds % 3600) // 60
-    if h and m:
-        return f"{h}h {m:02d}m"
     if h:
-        return f"{h}h"
+        return f"{h}h {m:02d}m"
     return f"{m}m"
 
 

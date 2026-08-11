@@ -395,7 +395,9 @@ class TestStats:
         s2 = common.new_session("pomodoro", now - 120, 5 * 60, "laptop", project="work")
         server.apply_session(s1)
         server.apply_session(s2)
+        s1["ended_at"] = s1["start_epoch"] + 25 * 60
         server.end_current(s1)
+        s2["ended_at"] = s2["start_epoch"] + 5 * 60
         server.end_current(s2)
         stats = server.get_stats()
         assert stats["session_count"] == 2
@@ -407,6 +409,7 @@ class TestStats:
         now = int(time.time())
         s = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
         server.apply_session(s)
+        s["ended_at"] = s["start_epoch"] + 25 * 60
         server.end_current(s)
         server.archive_session(s["id"], {"updated_at": time.time() + 1})
         stats = server.get_stats()
@@ -417,6 +420,7 @@ class TestStats:
         now = int(time.time())
         s = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
         server.apply_session(s)
+        s["ended_at"] = s["start_epoch"] + 25 * 60
         server.end_current(s)
         server.archive_session(s["id"], {"updated_at": time.time() + 1})
         stats = server.get_stats(include_archived=True)
@@ -430,7 +434,9 @@ class TestStats:
         s2 = common.new_session("pomodoro", now - 120, 15 * 60, "laptop", project="learning")
         server.apply_session(s1)
         server.apply_session(s2)
+        s1["ended_at"] = s1["start_epoch"] + 25 * 60
         server.end_current(s1)
+        s2["ended_at"] = s2["start_epoch"] + 15 * 60
         server.end_current(s2)
         stats = server.get_stats()
         assert stats["projects"]["work"]["seconds"] == 25 * 60
