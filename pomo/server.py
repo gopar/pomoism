@@ -309,11 +309,8 @@ def get_stats(
 ) -> dict:
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
-        where: list[str] = ["s.kind = 'pomodoro'"]
+        where: list[str] = []
         params: list = []
-
-        if not include_archived:
-            where.append("s.state != 'archived'")
 
         if from_date is not None:
             where.append("date(s.start_epoch, 'unixepoch', 'localtime') >= ?")
@@ -332,6 +329,11 @@ def get_stats(
         if project is not None:
             where.append("s.project = ?")
             params.append(project)
+
+        if not include_archived:
+            where.append("s.state != 'archived'")
+
+        where.append("s.kind = 'pomodoro'")
 
         where_clause = " AND ".join(where) if where else "1=1"
         # Inner subquery: same filters EXCEPT the archive exclusion.

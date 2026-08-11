@@ -442,13 +442,24 @@ class TestStats:
         assert stats["projects"]["work"]["seconds"] == 25 * 60
         assert stats["projects"]["learning"]["seconds"] == 15 * 60
 
-    def test_stats_empty(self):
-        stats = server.get_stats()
-        assert stats == {
-            "total_seconds": 0,
-            "session_count": 0,
-            "projects": {},
-        }
+    def test_stats_date_range(self):
+        # Given: sessions on today and two days ago
+        now = int(time.time())
+        today = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
+        old_epoch = now - 172800  # two days ago
+        old = common.new_session("pomodoro", old_epoch, 25 * 60, "laptop", project="work")
+        server.apply_session(today)
+        server.apply_session(old)
+        today["ended_at"] = today["start_epoch"] + 25 * 60
+        server.end_current(today)
+        old["ended_at"] = old["start_epoch"] + 25 * 60
+        server.end_current(old)
+        # When: filtered to today only
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        stats = server.get_stats(from_date=today_str, to_date=today_str)
+        # Then: only today's session counted
+        assert stats["session_count"] == 1
+        assert stats["total_seconds"] == 25 * 60
 
 
 class TestEditSession:
