@@ -327,5 +327,27 @@ def get_sessions(
     return cast(list, _request("GET", url))
 
 
+def get_stats(
+    server_url: str,
+    project: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    include_archived: bool = False,
+) -> dict:
+    params = {}
+    if project is not None:
+        params["project"] = project
+    if from_date is not None:
+        params["from"] = from_date
+    if to_date is not None:
+        params["to"] = to_date
+    if include_archived:
+        params["include_archived"] = "1"
+    url = server_url.rstrip("/") + "/stats"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    return cast(dict, _request("GET", url))
+
+
 def get_projects(server_url: str) -> list:
     return cast(list, _request("GET", server_url.rstrip("/") + "/projects"))

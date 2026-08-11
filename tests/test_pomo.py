@@ -607,3 +607,143 @@ class TestCmdProjects(Base):
         # Then: projects returned as JSON array of objects
         out = json.loads(capsys.readouterr().out)
         assert out == [{"project": "backend"}, {"project": "website"}]
+
+
+class TestCmdStats(Base):
+    """pomo stats — aggregated session statistics."""
+
+    @patch.object(common, "get_stats")
+    def test_stats_human_output(self, get_stats_mock, capsys):
+        # Given: stats with two ended pomodoros for "work"
+        get_stats_mock.return_value = {
+            "total_seconds": 50 * 60,
+            "session_count": 2,
+            "projects": {"work": {"seconds": 50 * 60, "count": 2}},
+        }
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        output = capsys.readouterr().out
+        # Then: output contains header date, session count, focus time, project breakdown
+        assert datetime.now().strftime("%Y-%m-%d") in output
+        assert "Sessions:    2" in output
+        assert "Focus time:  50m" in output
+        assert "work  2 sessions  50m" in output
+
+    @patch.object(common, "get_stats")
+    def test_stats_json_output(self, get_stats_mock, capsys):
+        # Given: stats data
+        stats = {"total_seconds": 1500, "session_count": 1, "projects": {}}
+        get_stats_mock.return_value = stats
+        # When: pomo stats --json is called
+        pomo.cmd_stats(json_output=True)
+        # Then: raw stats returned as JSON
+        assert json.loads(capsys.readouterr().out) == stats
+
+    @patch.object(common, "get_stats")
+    def test_stats_empty(self, get_stats_mock, capsys):
+        # Given: no completed sessions
+        get_stats_mock.return_value = {"total_seconds": 0, "session_count": 0, "projects": {}}
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        # Then: empty message shown
+        assert "No sessions" in capsys.readouterr().out
+
+    @patch.object(common, "get_stats", side_effect=common.ServerUnavailable("offline"))
+    def test_stats_offline_errors(self, _mock, capsys):
+        # Given: server is unreachable
+        # When / Then: pomo stats exits with an error
+        with pytest.raises(SystemExit):
+            pomo.cmd_stats()
+        assert "unavailable" in capsys.readouterr().err
+
+    @patch.object(common, "get_stats")
+    def test_stats_passes_filters(self, get_stats_mock, capsys):
+        # Given: mock that returns empty stats
+        get_stats_mock.return_value = {"total_seconds": 0, "session_count": 0, "projects": {}}
+        server_url = common.load_config()["server_url"]
+        # When: pomo stats with all filters is called
+        pomo.cmd_stats(
+            from_date="2026-08-01",
+            to_date="2026-08-07",
+            project="website",
+            include_archived=True,
+        )
+        # Then: get_stats was called with all filters forwarded
+        get_stats_mock.assert_called_once_with(
+            server_url,
+            project="website",
+            from_date="2026-08-01",
+            to_date="2026-08-07",
+            include_archived=True,
+        )
+
+    @patch.object(common, "get_stats")
+    def test_stats_no_projects_section(self, get_stats_mock, capsys):
+        # Given: stats with sessions but no projects
+        get_stats_mock.return_value = {
+            "total_seconds": 25 * 60,
+            "session_count": 1,
+            "projects": {},
+        }
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        output = capsys.readouterr().out
+        # Then: "By project:" section is not shown
+        assert "By project:" not in output
+
+    @patch.object(common, "get_stats")
+    def test_stats_date_header_range(self, get_stats_mock, capsys):
+        # Given: stats for a date range
+        get_stats_mock.return_value = {
+            "total_seconds": 25 * 60,
+            "session_count": 1,
+            "projects": {},
+        }
+        # When: pomo stats with both --from and --to is called
+        pomo.cmd_stats(from_date="2026-08-01", to_date="2026-08-07")
+        output = capsys.readouterr().out
+        # Then: header shows date range
+        assert "2026-08-01 → 2026-08-07" in output
+
+    @patch.object(common, "get_stats")
+    def test_stats_singular_session_label(self, get_stats_mock, capsys):
+        # Given: single session for a project
+        get_stats_mock.return_value = {
+            "total_seconds": 25 * 60,
+            "session_count": 1,
+            "projects": {"work": {"seconds": 25 * 60, "count": 1}},
+        }
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        output = capsys.readouterr().out
+        # Then: "session" is singular
+        assert "1 session" in output
+
+    @patch.object(common, "get_stats")
+    def test_stats_fmt_duration_sub_hour(self, get_stats_mock, capsys):
+        # Given: less than an hour total
+        get_stats_mock.return_value = {
+            "total_seconds": 25 * 60,
+            "session_count": 1,
+            "projects": {"work": {"seconds": 25 * 60, "count": 1}},
+        }
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        output = capsys.readouterr().out
+        # Then: focus time uses "25m" format
+        assert "Focus time:  25m" in output
+
+    @patch.object(common, "get_stats")
+    def test_stats_fmt_duration_hours_and_minutes(self, get_stats_mock, capsys):
+        # Given: over an hour of focus time
+        get_stats_mock.return_value = {
+            "total_seconds": 7500,
+            "session_count": 5,
+            "projects": {"work": {"seconds": 7500, "count": 5}},
+        }
+        # When: pomo stats is called
+        pomo.cmd_stats()
+        output = capsys.readouterr().out
+        # Then: focus time uses "2h 05m" format
+        assert "Focus time:  2h 05m" in output
+        assert "work  5 sessions  2h 05m" in output

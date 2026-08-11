@@ -73,6 +73,32 @@ pomo history --json                               # machine-readable
 | `--json` | Output as JSON |
 | `-p`, `--project` | Filter by project |
 
+### Stats
+
+```sh
+pomo stats
+# 2026-08-10
+#   Sessions:    5
+#   Focus time:  2h 05m
+#
+#   By project:
+#   website      4 sessions   1h 40m
+#   cli-tool     1 session      25m
+
+pomo stats --from 2026-08-01 --to 2026-08-07   # date range
+pomo stats --project website                     # filter by project
+pomo stats --include-archived                    # include archived sessions
+pomo stats --json                                # machine-readable
+```
+
+| Flag | Description |
+|---|---|
+| `--from DATE` | Start date (YYYY-MM-DD) |
+| `--to DATE` | End date (YYYY-MM-DD) |
+| `-p`, `--project` | Filter by project |
+| `--include-archived` | Include archived sessions |
+| `--json` | Output as JSON |
+
 ### Projects
 
 ```sh
@@ -237,6 +263,7 @@ in `agent.toml.sample`.
 | GET    | `/version`      | `{"version": "0.1.0"}`                     |
 | GET    | `/current`      | Current session or `{"state": "idle"}`     |
 | GET    | `/sessions`     | Sessions (optional `?project=`, `?from=`, `?to=`, `?state=`) |
+| GET    | `/stats`        | Aggregated statistics (optional `?project=`, `?from=`, `?to=`, `?include_archived=`) |
 | GET    | `/projects`     | All defined project names                   |
 | POST   | `/sessions`     | Upsert a session (LWW)                      |
 | POST   | `/sessions/end` | End the current session                     |

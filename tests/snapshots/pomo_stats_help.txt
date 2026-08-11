@@ -1,0 +1,11 @@
+usage: pomo stats [-h] [--json] [-p PROJECT] [--from DATE] [--to DATE]
+                  [--include-archived]
+
+options:
+  -h, --help            show this help message and exit
+  --json                Output as JSON
+  -p, --project PROJECT
+                        Filter by project
+  --from DATE           Start date (YYYY-MM-DD)
+  --to DATE             End date (YYYY-MM-DD)
+  --include-archived    Include archived sessions

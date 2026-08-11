@@ -305,11 +305,15 @@ def get_stats(
     from_date: str | None = None,
     to_date: str | None = None,
     project: str | None = None,
+    include_archived: bool = False,
 ) -> dict:
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
-        where: list[str] = ["s.state != 'archived'"]
+        where: list[str] = []
         params: list = []
+
+        if not include_archived:
+            where.append("s.state != 'archived'")
 
         if from_date is not None:
             where.append("date(s.start_epoch, 'unixepoch', 'localtime') >= ?")
@@ -329,7 +333,7 @@ def get_stats(
             where.append("s.project = ?")
             params.append(project)
 
-        where_clause = " AND ".join(where)
+        where_clause = " AND ".join(where) if where else "1=1"
         # Inner subquery: same filters EXCEPT the archive exclusion.
         inner_parts = [w for w in where if "archived" not in w]
         inner_where = " AND ".join(inner_parts).replace("s.", "") if inner_parts else "1=1"
@@ -353,7 +357,7 @@ def get_stats(
         dur = int(r["duration"])
         state = r["state"]
         proj = r["project"] or ""
-        if state not in ("ended", "archived"):
+        if state == "ended" or include_archived and state == "archived":
             total_seconds += dur
             session_count += 1
             if proj:
@@ -574,7 +578,13 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 return self._send_json({"error": str(exc)}, 400)
             project = qs.get("project", [None])[0]
-            stats = get_stats(from_date=from_date, to_date=to_date, project=project)
+            include_archived = qs.get("include_archived", ["0"])[0] == "1"
+            stats = get_stats(
+                from_date=from_date,
+                to_date=to_date,
+                project=project,
+                include_archived=include_archived,
+            )
             return self._send_json(stats)
         return self._send_json({"error": "not found"}, 404)
 

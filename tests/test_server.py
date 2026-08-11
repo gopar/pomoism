@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
@@ -353,8 +353,7 @@ class TestGetSessions:
         server.apply_session(today)
         server.apply_session(yesterday)
         # When: filtered to yesterday's date only
-        # SQLite date(epoch, 'unixepoch') is UTC — match that.
-        yesterday_str = datetime.fromtimestamp(yesterday_epoch, tz=UTC).date().isoformat()
+        yesterday_str = datetime.fromtimestamp(yesterday_epoch).date().isoformat()
         sessions = server.get_sessions(from_date=yesterday_str, to_date=yesterday_str)
         # Then: only yesterday's session returned
         assert len(sessions) == 1
@@ -396,6 +395,8 @@ class TestStats:
         s2 = common.new_session("break", now - 120, 5 * 60, "laptop", project="work")
         server.apply_session(s1)
         server.apply_session(s2)
+        server.end_current(s1)
+        server.end_current(s2)
         stats = server.get_stats()
         assert stats["session_count"] == 2
         assert stats["total_seconds"] == 30 * 60
@@ -406,10 +407,22 @@ class TestStats:
         now = int(time.time())
         s = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
         server.apply_session(s)
+        server.end_current(s)
         server.archive_session(s["id"], {"updated_at": time.time() + 1})
         stats = server.get_stats()
         assert stats["session_count"] == 0
         assert stats["total_seconds"] == 0
+
+    def test_stats_include_archived(self):
+        now = int(time.time())
+        s = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
+        server.apply_session(s)
+        server.end_current(s)
+        server.archive_session(s["id"], {"updated_at": time.time() + 1})
+        stats = server.get_stats(include_archived=True)
+        assert stats["session_count"] == 1
+        assert stats["total_seconds"] == 25 * 60
+        assert stats["projects"]["work"]["seconds"] == 25 * 60
 
     def test_stats_project_breakdown(self):
         now = int(time.time())
@@ -417,6 +430,8 @@ class TestStats:
         s2 = common.new_session("pomodoro", now - 120, 15 * 60, "laptop", project="learning")
         server.apply_session(s1)
         server.apply_session(s2)
+        server.end_current(s1)
+        server.end_current(s2)
         stats = server.get_stats()
         assert stats["projects"]["work"]["seconds"] == 25 * 60
         assert stats["projects"]["learning"]["seconds"] == 15 * 60
