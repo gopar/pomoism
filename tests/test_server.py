@@ -121,16 +121,22 @@ class TestLWW:
         applied, _ = server.apply_session(_session(100.0, sid="a"))
         # Then: write loses the pointer
         assert not applied
-        # Then: both rows exist in history — the stale write didn't overwrite
-        # the newer one (composite PK prevents collision)
+        # Then: sessions has one row at t=200 (stale write was a no-op)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT updated_at, state FROM sessions WHERE id = 'a' ORDER BY updated_at DESC"
+            rows = conn.execute("SELECT updated_at, state FROM sessions WHERE id = 'a'").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["updated_at"] == 200.0
+        # Then: session_history has both writes (audit trail preserved)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            hrows = conn.execute(
+                "SELECT updated_at, state FROM session_history WHERE id = 'a'"
+                " ORDER BY updated_at ASC"
             ).fetchall()
-        assert len(rows) == 2
-        assert rows[0]["updated_at"] == 200.0  # newer row intact
-        assert rows[1]["updated_at"] == 100.0  # stale row also present
+        assert len(hrows) == 2
+        assert hrows[0]["updated_at"] == 100.0  # stale write (applied second)
+        assert hrows[1]["updated_at"] == 200.0  # real write (applied first)
 
     def test_name_survives_roundtrip(self):
         # Given: a session is created with a name
@@ -499,19 +505,27 @@ class TestEditSession:
         with pytest.raises(ValueError, match="stale"):
             server.edit_session(s["id"], {"name": "too-late", "updated_at": 0.0})
 
-    def test_edit_inserts_new_history_row(self):
+    def test_edit_updates_in_place_and_logs_history(self):
         now = int(time.time())
         s = common.new_session("pomodoro", now - 60, 60, "laptop", name="v1")
         server.apply_session(s)
         server.edit_session(s["id"], {"name": "v2", "updated_at": time.time() + 1})
+        # Then: sessions has one row with the new name (mutated in place)
         with sqlite3.connect(server.DB_PATH) as conn:
             rows = conn.execute(
-                "SELECT name, updated_at FROM sessions WHERE id = ? ORDER BY updated_at ASC",
+                "SELECT name, updated_at FROM sessions WHERE id = ?", (s["id"],)
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "v2"
+        # Then: session_history has both versions (audit trail preserved)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            hrows = conn.execute(
+                "SELECT name FROM session_history WHERE id = ? ORDER BY updated_at ASC",
                 (s["id"],),
             ).fetchall()
-        assert len(rows) == 2
-        assert rows[0][0] == "v1"
-        assert rows[1][0] == "v2"
+        assert len(hrows) == 2
+        assert hrows[0][0] == "v1"
+        assert hrows[1][0] == "v2"
 
 
 class TestArchiveSession:
