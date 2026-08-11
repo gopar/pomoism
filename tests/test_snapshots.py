@@ -25,7 +25,7 @@ def _assert_snapshot(name: str, args: list[str]) -> None:
         [sys.executable, "-m", "pomo.cli", *args],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
+        cwd=REPO_ROOT / "src",
     )
     actual = result.stdout.rstrip()
 
