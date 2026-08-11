@@ -309,7 +309,7 @@ def get_stats(
 ) -> dict:
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
-        where: list[str] = []
+        where: list[str] = ["s.kind = 'pomodoro'"]
         params: list = []
 
         if not include_archived:

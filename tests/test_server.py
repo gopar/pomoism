@@ -392,7 +392,7 @@ class TestStats:
     def test_stats_today_only(self):
         now = int(time.time())
         s1 = common.new_session("pomodoro", now - 60, 25 * 60, "laptop", project="work")
-        s2 = common.new_session("break", now - 120, 5 * 60, "laptop", project="work")
+        s2 = common.new_session("pomodoro", now - 120, 5 * 60, "laptop", project="work")
         server.apply_session(s1)
         server.apply_session(s2)
         server.end_current(s1)
