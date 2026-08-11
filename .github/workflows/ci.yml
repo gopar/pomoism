@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Byte-compile all sources (syntax gate)
-        run: python -m compileall pomo tests
+        run: python -m compileall src/pomo tests
 
   lint:
     runs-on: ubuntu-latest
@@ -47,4 +47,4 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
       - name: Type check
-        run: pip install ty && ty check pomo
+        run: pip install ty && ty check src/pomo
