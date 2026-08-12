@@ -13,6 +13,7 @@ Responsibilities:
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import socket
@@ -239,13 +240,15 @@ _DEFAULT_CONFIG = {
 
 def load_config() -> dict:
     """Load agent.toml merged over defaults. Missing file -> defaults."""
-    cfg = json.loads(json.dumps(_DEFAULT_CONFIG))  # deep copy
+    cfg = copy.deepcopy(_DEFAULT_CONFIG)
     if tomllib is not None and CONFIG_FILE.exists():
         with CONFIG_FILE.open("rb") as fh:
             user = tomllib.load(fh)
         for key, val in user.items():
             if key == "hooks" and isinstance(val, dict):
-                cfg[key].update(val)
+                hooks = cfg.get("hooks")
+                if isinstance(hooks, dict):
+                    hooks.update(val)
             else:
                 cfg[key] = val
     if not cfg.get("machine_name"):
