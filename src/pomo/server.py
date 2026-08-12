@@ -80,54 +80,6 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _migrate_from_composite_pk(conn: sqlite3.Connection) -> None:
-    """One-time migration: old composite-PK table → single PK + history table.
-
-    Preserves all historical rows in session_history; keeps only the latest per id in sessions.
-    """
-    # Check whether the sessions table has the old composite PK.
-    cur = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='sessions'")
-    row = cur.fetchone()
-    if not row or not row[0] or "PRIMARY KEY (id, updated_at)" not in row[0]:
-        return
-
-    sys.stderr.write("pomo-server: migrating sessions to single-PK schema ...\n")
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        # Move all existing rows into history.
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS session_history ("
-            "  id TEXT NOT NULL, state TEXT NOT NULL, start_epoch INTEGER NOT NULL,"
-            "  duration INTEGER NOT NULL, origin_machine TEXT NOT NULL,"
-            "  updated_at REAL NOT NULL, ended_at REAL, name TEXT, project TEXT, kind TEXT"
-            ")"
-        )
-        conn.execute("INSERT INTO session_history SELECT * FROM sessions")
-
-        # Build new sessions table with only the latest row per session id.
-        conn.execute(
-            "CREATE TABLE sessions_new ("
-            "  id TEXT PRIMARY KEY, state TEXT NOT NULL, start_epoch INTEGER NOT NULL,"
-            "  duration INTEGER NOT NULL, origin_machine TEXT NOT NULL,"
-            "  updated_at REAL NOT NULL, ended_at REAL, name TEXT, project TEXT, kind TEXT"
-            ")"
-        )
-        conn.execute(
-            "INSERT INTO sessions_new "
-            "SELECT s.* FROM sessions s "
-            "INNER JOIN (SELECT id, MAX(updated_at) AS max_updated "
-            "            FROM sessions GROUP BY id) latest "
-            "ON s.id = latest.id AND s.updated_at = latest.max_updated"
-        )
-        conn.execute("DROP TABLE sessions")
-        conn.execute("ALTER TABLE sessions_new RENAME TO sessions")
-        conn.execute("COMMIT")
-        sys.stderr.write("pomo-server: migration complete\n")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
-
-
 def init_db() -> None:
     with contextlib.closing(_connect()) as conn:
         conn.execute(
@@ -146,8 +98,6 @@ def init_db() -> None:
             )
             """
         )
-        # Migrate away from the old composite-PK schema if needed.
-        _migrate_from_composite_pk(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_history ("
             "  id TEXT NOT NULL, state TEXT NOT NULL, start_epoch INTEGER NOT NULL,"
