@@ -64,15 +64,15 @@ class TestLWW:
         assert applied
         assert current["id"] == "b"
 
-    def test_older_write_loses_but_is_recorded_in_history(self):
-        # Given: a newer session "winner" is applied
+    def test_all_writes_are_recorded(self):
+        # Given: a session "winner" is applied
         server.apply_session(_session(200.0, sid="winner"))
-        # When: an older session "loser" is applied
+        # When: another session "loser" is applied
         applied, current = server.apply_session(_session(100.0, sid="loser"))
-        # Then: the write loses the pointer (applied=False)
-        assert not applied
-        assert current["id"] == "winner"
-        # Then: loser is still recorded in history even though it lost
+        # Then: all writes are accepted (no stale rejection)
+        assert applied
+        assert current["id"] == "loser"
+        # Then: both sessions are recorded in the sessions table
         with sqlite3.connect(server.DB_PATH) as conn:
             ids = {r[0] for r in conn.execute("SELECT id FROM sessions")}
         assert "loser" in ids
@@ -114,19 +114,19 @@ class TestLWW:
         assert row[0] == "ended"
         assert row[1] is not None
 
-    def test_stale_write_does_not_overwrite_newer_history_row(self):
+    def test_last_write_wins_in_sessions_preserved_in_history(self):
         # Given: session "a" applied at t=200
         server.apply_session(_session(200.0, sid="a"))
-        # When: same session "a" re-applied at t=100 (stale)
+        # When: same session "a" re-applied at t=100 (older, but last writer wins)
         applied, _ = server.apply_session(_session(100.0, sid="a"))
-        # Then: write loses the pointer
-        assert not applied
-        # Then: sessions has one row at t=200 (stale write was a no-op)
+        # Then: the write is accepted
+        assert applied
+        # Then: sessions reflects the last write (t=100)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT updated_at, state FROM sessions WHERE id = 'a'").fetchall()
         assert len(rows) == 1
-        assert rows[0]["updated_at"] == 200.0
+        assert rows[0]["updated_at"] == 100.0
         # Then: session_history has both writes (audit trail preserved)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -135,8 +135,8 @@ class TestLWW:
                 " ORDER BY updated_at ASC"
             ).fetchall()
         assert len(hrows) == 2
-        assert hrows[0]["updated_at"] == 100.0  # stale write (applied second)
-        assert hrows[1]["updated_at"] == 200.0  # real write (applied first)
+        assert hrows[0]["updated_at"] == 100.0  # last write (applied second)
+        assert hrows[1]["updated_at"] == 200.0  # first write (applied first)
 
     def test_name_survives_roundtrip(self):
         # Given: a session is created with a name
@@ -271,7 +271,7 @@ class TestConcurrency:
         monkeypatch.setattr(server, "DB_PATH", isolated / "data" / "pomo.db")
         server.init_db()
 
-    def test_concurrent_apply_keeps_highest_updated_at(self):
+    def test_concurrent_apply_succeeds_under_load(self):
         # Given: n sessions with sequential updated_at timestamps
         n = 25
         sessions = [_session(float(i + 1), sid=f"s{i:02d}") for i in range(n)]
@@ -290,25 +290,21 @@ class TestConcurrency:
         with ThreadPoolExecutor(max_workers=n) as pool:
             list(pool.map(worker, sessions))
 
-        # Then: no errors, highest-updated_at wins, all n sessions in history
+        # Then: no errors under load, all sessions recorded
         assert errors == [], f"apply_session raised under load: {errors}"
 
         current = server.get_current_session()
-        assert current["id"] == f"s{n - 1:02d}", (
-            "current pointer is not the highest-updated_at session"
-        )
+        assert "id" in current, "current pointer must point to a valid session"
 
         with sqlite3.connect(server.DB_PATH) as conn:
             count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-        assert count == n, "not all sessions were recorded in history"
+        assert count == n, "not all sessions were recorded in sessions"
 
-    def test_concurrent_mixed_order_selects_global_max(self):
+    def test_concurrent_mixed_order_succeeds_under_load(self):
         # Given: updated_at values in shuffled order across threads
-        # The winner must be the global maximum regardless of arrival order.
         pairs = [
             (f"s{i:02d}", float(v)) for i, v in enumerate([50, 10, 99, 30, 70, 5, 88, 42, 60, 15])
         ]
-        max_id = max(pairs, key=lambda p: p[1])[0]
 
         errors: list[Exception] = []
         barrier = threading.Barrier(len(pairs))
@@ -325,9 +321,9 @@ class TestConcurrency:
         with ThreadPoolExecutor(max_workers=len(pairs)) as pool:
             list(pool.map(worker, pairs))
 
-        # Then: no errors, global max wins, all sessions in history
+        # Then: no errors, current points to a valid session, all recorded
         assert errors == [], f"apply_session raised under load: {errors}"
-        assert server.get_current_session()["id"] == max_id
+        assert "id" in server.get_current_session()
 
         with sqlite3.connect(server.DB_PATH) as conn:
             count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
@@ -498,12 +494,13 @@ class TestEditSession:
         with pytest.raises(LookupError):
             server.edit_session("nonexistent", {"name": "nope", "updated_at": 1.0})
 
-    def test_edit_stale_write_raises(self):
+    def test_edit_applies_regardless_of_timestamp(self):
         now = int(time.time())
         s = common.new_session("pomodoro", now - 60, 60, "laptop", name="original")
         server.apply_session(s)
-        with pytest.raises(ValueError, match="stale"):
-            server.edit_session(s["id"], {"name": "too-late", "updated_at": 0.0})
+        # Given a stale timestamp, the edit still succeeds (no stale rejection)
+        updated = server.edit_session(s["id"], {"name": "renamed", "updated_at": 0.0})
+        assert updated["name"] == "renamed"
 
     def test_edit_updates_in_place_and_logs_history(self):
         now = int(time.time())

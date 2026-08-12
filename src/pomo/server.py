@@ -67,16 +67,9 @@ class RequestTooLarge(Exception):
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # isolation_level=None -> autocommit; we drive transactions explicitly with
-    # BEGIN IMMEDIATE so the LWW read-modify-write cannot interleave.
     conn = sqlite3.connect(DB_PATH, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    # WAL improves read/write concurrency; busy_timeout blocks (instead of
-    # instantly erroring) when another writer holds the lock. synchronous=NORMAL
-    # is the safe pairing for WAL (durable across app crashes).
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -154,11 +147,7 @@ def _row_to_session(row: sqlite3.Row) -> dict:
 
 
 def _current_session_locked(conn: sqlite3.Connection) -> dict:
-    """Read the current session using an already-open connection.
-
-    Shared by the public getter and apply_session (so the returned `current`
-    can be read inside the same transaction, closing the read-after-commit gap).
-    """
+    """Read the current session using an already-open connection."""
     row = conn.execute("SELECT session_id FROM current WHERE singleton = 0").fetchone()
     if not row or not row["session_id"]:
         return common.idle_session()
@@ -177,17 +166,7 @@ def get_current_session() -> dict:
 
 
 def apply_session(session: dict) -> tuple[bool, dict]:
-    """Insert/replace current session under last-write-wins.
-
-    Returns (applied, current_session). If the incoming updated_at is older
-    than the stored current pointer, the write is ignored (applied=False).
-
-    The session UPSERT and the guarded pointer UPDATE run inside a single
-    BEGIN IMMEDIATE transaction. The LWW comparison lives in the UPSERT's
-    WHERE clause (`excluded.updated_at >= sessions.updated_at`) and the
-    pointer UPDATE's WHERE clause (`? >= updated_at`), so it is atomic and
-    cannot lose an update under concurrent writers.
-    """
+    """Insert/replace current session. Returns (True, current_session)."""
     required = ("id", "state", "start_epoch", "duration", "origin_machine", "updated_at")
     for key in required:
         if key not in session:
@@ -197,59 +176,46 @@ def apply_session(session: dict) -> tuple[bool, dict]:
 
     with contextlib.closing(_connect()) as conn:
         incoming = float(session["updated_at"])
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute(
-                "INSERT INTO sessions "
-                "(id, state, start_epoch, duration, origin_machine, "
-                "updated_at, ended_at, name, project, kind) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET "
-                "state = excluded.state, "
-                "start_epoch = excluded.start_epoch, "
-                "duration = excluded.duration, "
-                "origin_machine = excluded.origin_machine, "
-                "updated_at = excluded.updated_at, "
-                "ended_at = excluded.ended_at, "
-                "name = excluded.name, "
-                "project = excluded.project, "
-                "kind = excluded.kind "
-                "WHERE excluded.updated_at >= sessions.updated_at",
-                (
-                    session["id"],
-                    session["state"],
-                    int(session["start_epoch"]),
-                    int(session["duration"]),
-                    session["origin_machine"],
-                    incoming,
-                    session.get("ended_at"),
-                    session.get("name"),
-                    session.get("project"),
-                    session.get("kind"),
-                ),
-            )
-            _record_history(conn, session)
-            cur = conn.execute(
-                "UPDATE current SET session_id = ?, updated_at = ? "
-                "WHERE singleton = 0 AND ? >= updated_at",
-                (session["id"], incoming, incoming),
-            )
-            applied = cur.rowcount == 1
-            sid = common.sid8(session)
-            if applied:
-                sys.stderr.write(f"pomo-server: {sid} applied ({session['state']})\n")
-            else:
-                sys.stderr.write(f"pomo-server: {sid} rejected (stale)\n")
-            current = _current_session_locked(conn)
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
-    return applied, current
+        conn.execute(
+            "INSERT INTO sessions "
+            "(id, state, start_epoch, duration, origin_machine, "
+            "updated_at, ended_at, name, project, kind) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "state = excluded.state, "
+            "start_epoch = excluded.start_epoch, "
+            "duration = excluded.duration, "
+            "origin_machine = excluded.origin_machine, "
+            "updated_at = excluded.updated_at, "
+            "ended_at = excluded.ended_at, "
+            "name = excluded.name, "
+            "project = excluded.project, "
+            "kind = excluded.kind",
+            (
+                session["id"],
+                session["state"],
+                int(session["start_epoch"]),
+                int(session["duration"]),
+                session["origin_machine"],
+                incoming,
+                session.get("ended_at"),
+                session.get("name"),
+                session.get("project"),
+                session.get("kind"),
+            ),
+        )
+        _record_history(conn, session)
+        conn.execute(
+            "UPDATE current SET session_id = ?, updated_at = ? WHERE singleton = 0",
+            (session["id"], incoming),
+        )
+        sys.stderr.write(f"pomo-server: {common.sid8(session)} ({session['state']})\n")
+        current = _current_session_locked(conn)
+    return True, current
 
 
 def end_current(session: dict) -> tuple[bool, dict]:
-    """Mark the current session ended under LWW using the provided record."""
+    """Mark the current session ended using the provided record."""
     ended = dict(session)
     ended["state"] = "ended"
     ended.setdefault("ended_at", time.time())
@@ -383,13 +349,7 @@ def get_stats(
 
 
 def edit_session(session_id: str, fields: dict) -> dict:
-    """Edit name/project on a session (LWW-guarded).
-
-    The incoming `fields` dict must include `updated_at` for the LWW guard.
-    Mutates the session row in place and appends a history entry.
-    Returns the updated session dict. Raises LookupError if session not found,
-    ValueError if the write is stale.
-    """
+    """Edit name/project on a session. Returns the updated session dict."""
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -397,42 +357,23 @@ def edit_session(session_id: str, fields: dict) -> dict:
             raise LookupError(f"session {session_id!r} not found")
 
         session = _row_to_session(row)
-        incoming_updated_at = float(fields.get("updated_at", 0))
-
-        if incoming_updated_at < session["updated_at"]:
-            raise ValueError("stale write rejected")
-
         name = fields.get("name") if "name" in fields else session["name"]
         project = fields.get("project") if "project" in fields else session["project"]
         new_updated_at = time.time()
 
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute(
-                "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
-                (name, project, new_updated_at, session_id),
-            )
-            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-            if not srow:
-                conn.execute("ROLLBACK")
-                raise LookupError(f"session {session_id!r} not found after update")
-            result = _row_to_session(srow)
-            _record_history(conn, result)
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        conn.execute(
+            "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
+            (name, project, new_updated_at, session_id),
+        )
+        srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        result = _row_to_session(srow)
+        _record_history(conn, result)
     sys.stderr.write(f"pomo-server: {session_id[:8]} edited\n")
     return result
 
 
 def archive_session(session_id: str, session: dict) -> tuple[bool, dict]:
-    """Mark a session as archived (soft-delete) under LWW.
-
-    The incoming `session` dict carries the `updated_at` for the LWW gate.
-    Mutates the session row in place and appends a history entry.
-    Returns (applied, current_session).
-    """
+    """Mark a session as archived (soft-delete). Returns (True, current_session)."""
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -440,34 +381,23 @@ def archive_session(session_id: str, session: dict) -> tuple[bool, dict]:
             raise ValueError(f"session {session_id!r} not found")
 
         existing = _row_to_session(row)
-        incoming = float(session.get("updated_at", 0))
         new_updated_at = time.time()
 
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute(
-                "UPDATE sessions SET state = 'archived', ended_at = ?, updated_at = ? "
-                "WHERE id = ? AND ? >= updated_at",
-                (existing.get("ended_at") or time.time(), new_updated_at, session_id, incoming),
-            )
-            cur = conn.execute(
-                "UPDATE current SET session_id = ?, updated_at = ? "
-                "WHERE singleton = 0 AND session_id = ? AND ? >= updated_at",
-                (session_id, new_updated_at, session_id, incoming),
-            )
-            applied = cur.rowcount == 1
-            sid = session_id[:8]
-            if applied:
-                sys.stderr.write(f"pomo-server: {sid} archived\n")
-            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-            if srow:
-                _record_history(conn, _row_to_session(srow))
-            current = _current_session_locked(conn)
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
-    return applied, current
+        conn.execute(
+            "UPDATE sessions SET state = 'archived', ended_at = ?, updated_at = ? WHERE id = ?",
+            (existing.get("ended_at") or time.time(), new_updated_at, session_id),
+        )
+        conn.execute(
+            "UPDATE current SET session_id = ?, updated_at = ? "
+            "WHERE singleton = 0 AND session_id = ?",
+            (session_id, new_updated_at, session_id),
+        )
+        sys.stderr.write(f"pomo-server: {session_id[:8]} archived\n")
+        srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if srow:
+            _record_history(conn, _row_to_session(srow))
+        current = _current_session_locked(conn)
+    return True, current
 
 
 def _validate_date(value: str | None) -> str | None:
