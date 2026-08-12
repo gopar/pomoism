@@ -96,7 +96,7 @@ def _migrate_from_composite_pk(conn: sqlite3.Connection) -> None:
     try:
         # Move all existing rows into history.
         conn.execute(
-            "CREATE TABLE session_history ("
+            "CREATE TABLE IF NOT EXISTS session_history ("
             "  id TEXT NOT NULL, state TEXT NOT NULL, start_epoch INTEGER NOT NULL,"
             "  duration INTEGER NOT NULL, origin_machine TEXT NOT NULL,"
             "  updated_at REAL NOT NULL, ended_at REAL, name TEXT, project TEXT, kind TEXT"
@@ -146,6 +146,8 @@ def init_db() -> None:
             )
             """
         )
+        # Migrate away from the old composite-PK schema if needed.
+        _migrate_from_composite_pk(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_history ("
             "  id TEXT NOT NULL, state TEXT NOT NULL, start_epoch INTEGER NOT NULL,"
@@ -153,8 +155,6 @@ def init_db() -> None:
             "  updated_at REAL NOT NULL, ended_at REAL, name TEXT, project TEXT, kind TEXT"
             ")"
         )
-        # Migrate away from the old composite-PK schema if needed.
-        _migrate_from_composite_pk(conn)
 
         # `current` holds the id of the active session (single row, id=0).
         conn.execute(
