@@ -10,7 +10,6 @@ systemd
 hooks
 src/pomo/agent.py
 src/pomo/pomo.py
-agent.toml.sample
 README.md
 AGENTS.md
 Dockerfile

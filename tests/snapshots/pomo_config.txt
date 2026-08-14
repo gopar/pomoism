@@ -1,0 +1,6 @@
+usage: pomo config [-h] [--json] [--init]
+
+options:
+  -h, --help  show this help message and exit
+  --json      Output as JSON
+  --init      Create the config file if missing

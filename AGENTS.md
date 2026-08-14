@@ -61,9 +61,12 @@ CLI are host processes by design.
 
 ## Config & paths
 
-- Config: `~/.config/pomo/agent.toml` (see `agent.toml.sample`), merged over
-  `_DEFAULT_CONFIG` in `pomo/common.py`. Only `[hooks]` is deep-merged; other keys
-  replace. Agent re-reads config every loop.
+- Config: `~/.config/pomo/agent.toml`, merged over `_DEFAULT_CONFIG` in
+  `pomo/common.py` (only `[hooks]` is deep-merged; other keys replace; the
+  agent re-reads config every loop). Fresh files are written by
+  `pomo config --init` from the `CONFIG_SAMPLE` string constant in
+  `pomo/common.py` (the single source of truth for config docs; there is no
+  separate sample file).
 - Env overrides: `POMO_SERVER_URL` (agent/CLI), `POMO_TOKEN` (bearer auth, both
   ends), `POMO_PORT`/`POMO_HOST`/`POMO_DB_PATH` (server).
 - Paths in `pomo/common.py`: cache `~/.cache/pomo/`, DB `~/.local/share/pomo/pomo.db`.

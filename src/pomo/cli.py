@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -340,6 +341,31 @@ def cmd_stats(
             print(f"  {proj.ljust(max_len)}  {count} {label}  {time_str}")
 
 
+def cmd_config(json_output: bool = False, init: bool = False) -> None:
+    if init:
+        try:
+            common.create_default_config()
+        except FileExistsError:
+            sys.stderr.write(f"Error: config already exists at {common.CONFIG_FILE}\n")
+            sys.exit(1)
+        print(f"Config written to {common.CONFIG_FILE}")
+        return
+
+    cfg = common.load_config()
+    exists = common.CONFIG_FILE.exists()
+    if json_output:
+        print(json.dumps({"path": str(common.CONFIG_FILE), "exists": exists, "config": cfg}))
+        return
+
+    state = "found" if exists else "missing — run 'pomo config --init' to create"
+    print(f"Config file: {common.CONFIG_FILE} ({state})")
+    print()
+    print(common.render_toml(cfg))
+    if "POMO_SERVER_URL" in os.environ:
+        print()
+        print("# server_url overridden by POMO_SERVER_URL")
+
+
 def _local_today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
@@ -404,6 +430,10 @@ def _argparser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
     p.add_argument("--to", dest="to_date", metavar="DATE", help="End date (YYYY-MM-DD)")
     p.add_argument("--include-archived", action="store_true", help="Include archived sessions")
 
+    p = sub.add_parser("config", help="Show configuration")
+    p.add_argument("--json", action="store_true", help="Output as JSON")
+    p.add_argument("--init", action="store_true", help="Create the config file if missing")
+
     svc = sub.add_parser("service", help="Manage pomo processes")
     svc_subs = svc.add_subparsers(dest="service_command")
 
@@ -460,6 +490,8 @@ def main(argv: list[str] | None = None) -> None:
             to_date=args.to_date,
             include_archived=args.include_archived,
         )
+    elif args.command == "config":
+        cmd_config(json_output=args.json, init=args.init)
     elif args.command == "service":
         if args.service_command is None:
             svc_parser.print_help()

@@ -111,34 +111,64 @@ pomo projects --json
 # [{"project": "website"}, {"project": "backend"}, ...]
 ```
 
+### Config
+
+```sh
+pomo config
+# Config file: ~/.config/pomo/agent.toml (found)
+#
+# server_url = "http://127.0.0.1:8787"
+# machine_name = "laptop"
+# poll_interval = 5
+# run_for_remote_sessions = false
+#
+# [hooks]
+# enabled = true
+# timeout = 10
+# dir = ""
+
+pomo config --json      # machine-readable (path, exists, effective config)
+pomo config --init      # create ~/.config/pomo/agent.toml from the built-in sample if missing
+```
+
 ### Full help
 
 ```
 pomo --help
-usage: pomo [-h] {start,break,clear,status,history,projects} ...
+usage: pomo [-h] [--version]
+            {start,break,clear,status,history,projects,stats,config,service} ...
+
+Start, stop, and track pomodoro sessions.
 
 positional arguments:
-  {start,break,clear,status,history,projects}
+  {start,break,clear,status,history,projects,stats,config,service}
     start               Start a pomodoro for N minutes
     break               Start a break for N minutes
     clear               Stop current session, optionally start a break
     status              Show current session status
-    history             Show today's session history
+    history             Show session history
     projects            List all defined projects
+    stats               Show session statistics
+    config              Show configuration
+    service             Manage pomo processes
 
 options:
   -h, --help            show this help message and exit
+  --version             show program's version number and exit
 ```
 
 ---
 
 ## Setup
 
-1. **Copy the sample config:**
+1. **Create the config file:**
 
    ```sh
-   cp agent.toml.sample agent.toml
+   pomo config --init
    ```
+
+   Writes `~/.config/pomo/agent.toml` from the built-in sample (defaults with
+   explanatory comments).
 
    Edit `server_url` to point at your home-base machine. A Tailscale hostname
    works well. Set `POMO_TOKEN` on the server and all agents if you want
@@ -226,7 +256,7 @@ Each script receives context:
 
 Hooks are best-effort: a failing, missing, or slow script (killed after
 `hooks.timeout` seconds) never affects the timer or CLI. Tune via `[hooks]`
-in `agent.toml.sample`.
+in `agent.toml`.
 
 ---
 
@@ -241,7 +271,7 @@ in `agent.toml.sample`.
 | Bearer token   | `POMO_TOKEN` (server + agents)               |
 | Server port    | `POMO_PORT` (default 8787)                   |
 
-### Config keys (`agent.toml` / `agent.toml.sample`)
+### Config keys (`agent.toml`)
 
 | Key                        | Default                | Notes                        |
 |----------------------------|------------------------|------------------------------|

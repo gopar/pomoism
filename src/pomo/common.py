@@ -258,6 +258,76 @@ def load_config() -> dict:
     return cfg
 
 
+def render_toml(cfg: dict) -> str:
+    """Render a config dict (scalar values plus one-level dict sections) as TOML."""
+    lines: list[str] = []
+    sections = {k: v for k, v in cfg.items() if isinstance(v, dict)}
+    for key, value in cfg.items():
+        if key in sections:
+            continue
+        lines.append(f"{key} = {_toml_scalar(value)}")
+    for section, entries in sections.items():
+        lines.append("")
+        lines.append(f"[{section}]")
+        for key, value in entries.items():
+            lines.append(f"{key} = {_toml_scalar(value)}")
+    return "\n".join(lines)
+
+
+def _toml_scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(value)
+
+
+# Canonical text for a fresh agent.toml. Single source of truth — no separate
+# sample file. Written by `pomo config --init` (see cli.py).
+CONFIG_SAMPLE = """\
+# Pomodoro agent configuration (per machine).
+# Written by 'pomo config --init'. Edit freely; all keys are optional.
+
+# URL of the pomo server (home-base machine or VPS).
+# Tip: use a Tailscale hostname so it works from anywhere without exposing
+# the port publicly. Overridden by the POMO_SERVER_URL env var if set.
+server_url = "http://127.0.0.1:8787"
+
+# Identity used for last-write-wins/history. Defaults to the hostname.
+machine_name = "laptop"
+
+# Seconds between server polls.
+poll_interval = 5
+
+# Fire lifecycle hooks for sessions that STARTED on another machine?
+# false = remote sessions only update the local cache/display here.
+run_for_remote_sessions = false
+
+[hooks]
+# ALL side effects are hook-driven; the agent itself is OS-agnostic. Drop your
+# own executables into:
+#   ~/.config/pomo/hooks/<event>.d/*        (must be executable, chmod +x)
+# Events: pomodoro_start, break_start, pomodoro_overtime, break_overtime, session_stop.
+# Scripts run in lexical filename order (use 10-, 20- prefixes to order them).
+# Ready-made examples (macOS + Linux, Windows stub) live in hooks/examples/.
+#
+# Each script receives context as env vars:
+#   POMO_EVENT POMO_STATE POMO_START_EPOCH POMO_DURATION
+#   POMO_MACHINE POMO_ORIGIN_MACHINE POMO_REMOTE(0/1) POMO_SESSION_ID
+# and the full session as JSON on stdin.
+enabled = true
+timeout = 10               # seconds; a hook exceeding this is killed
+dir = ""                   # override hooks dir; empty = ~/.config/pomo/hooks
+"""
+
+
+def create_default_config() -> None:
+    """Create agent.toml from CONFIG_SAMPLE. Raises FileExistsError."""
+    ensure_dirs()
+    with CONFIG_FILE.open("x", encoding="utf-8") as fh:
+        fh.write(CONFIG_SAMPLE)
+
+
 # ---------------------------------------------------------------------------
 # HTTP JSON client
 # ---------------------------------------------------------------------------

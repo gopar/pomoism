@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import json
 import time
+import tomllib
 from datetime import datetime
 from unittest.mock import patch
 
@@ -747,3 +748,78 @@ class TestCmdStats(Base):
         # Then: focus time uses "2h 05m" format
         assert "Focus time:  2h 05m" in output
         assert "work  5 sessions  2h 05m" in output
+
+
+class TestCmdConfig(Base):
+    """pomo config — show effective config; --init creates the file."""
+
+    def test_config_shows_effective_defaults_when_missing(self, capsys):
+        # Given: no agent.toml exists
+        # When: pomo config is run
+        pomo.cmd_config()
+        out = capsys.readouterr().out
+        # Then: config file path is reported as missing and defaults are displayed
+        assert str(common.CONFIG_FILE) in out
+        assert "missing" in out
+        assert 'server_url = "http://127.0.0.1:8787"' in out
+        assert "[hooks]" in out
+        assert "enabled = true" in out
+
+    def test_config_json_when_missing(self, capsys):
+        # Given: no agent.toml exists
+        # When: pomo config --json is run
+        pomo.cmd_config(json_output=True)
+        out = json.loads(capsys.readouterr().out)
+        # Then: output includes path, exists flag, and the effective config
+        assert out["path"] == str(common.CONFIG_FILE)
+        assert out["exists"] is False
+        assert out["config"]["server_url"] == common._DEFAULT_CONFIG["server_url"]
+        assert out["config"]["hooks"]["timeout"] == common._DEFAULT_CONFIG["hooks"]["timeout"]
+
+    def test_config_init_creates_default_file(self, capsys):
+        # Given: no agent.toml exists
+        # When: pomo config --init is run
+        pomo.cmd_config(init=True)
+        # Then: the file exists and is a verbatim copy of the built-in sample
+        assert common.CONFIG_FILE.exists()
+        assert common.CONFIG_FILE.read_text(encoding="utf-8") == common.CONFIG_SAMPLE
+        # Then: the sample parses as TOML and its values resolve on load
+        assert tomllib.loads(common.CONFIG_SAMPLE)["server_url"] == "http://127.0.0.1:8787"
+        cfg = common.load_config()
+        assert cfg["machine_name"] == "laptop"
+        assert cfg["hooks"]["timeout"] == 10
+        assert "written" in capsys.readouterr().out
+
+    def test_config_init_respects_existing_file(self, capsys):
+        # Given: an existing custom agent.toml
+        common.ensure_dirs()
+        common.CONFIG_FILE.write_text('server_url = "http://example:1234"\n', encoding="utf-8")
+        # When: pomo config --init is run
+        with pytest.raises(SystemExit):
+            pomo.cmd_config(init=True)
+        # Then: the existing file is untouched and an error is reported
+        assert (
+            common.CONFIG_FILE.read_text(encoding="utf-8") == 'server_url = "http://example:1234"\n'
+        )
+        assert "already exists" in capsys.readouterr().err
+
+    def test_config_shows_user_overrides(self, capsys):
+        # Given: a user config overriding the server_url
+        common.ensure_dirs()
+        common.CONFIG_FILE.write_text('server_url = "http://example:1234"\n', encoding="utf-8")
+        # When: pomo config is run
+        pomo.cmd_config()
+        out = capsys.readouterr().out
+        # Then: the user value is shown and the file is reported as found
+        assert "(found)" in out
+        assert 'server_url = "http://example:1234"' in out
+
+    def test_config_notes_server_url_env_override(self, monkeypatch, capsys):
+        # Given: POMO_SERVER_URL env var is set
+        monkeypatch.setenv("POMO_SERVER_URL", "http://env:9999")
+        # When: pomo config is run
+        pomo.cmd_config()
+        out = capsys.readouterr().out
+        # Then: the env override wins and is called out
+        assert 'server_url = "http://env:9999"' in out
+        assert "POMO_SERVER_URL" in out

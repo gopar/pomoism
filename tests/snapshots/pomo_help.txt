@@ -1,10 +1,10 @@
 usage: pomo [-h] [--version]
-            {start,break,clear,status,history,projects,stats,service} ...
+            {start,break,clear,status,history,projects,stats,config,service} ...
 
 Start, stop, and track pomodoro sessions.
 
 positional arguments:
-  {start,break,clear,status,history,projects,stats,service}
+  {start,break,clear,status,history,projects,stats,config,service}
     start               Start a pomodoro for N minutes
     break               Start a break for N minutes
     clear               Stop current session, optionally start a break
@@ -12,6 +12,7 @@ positional arguments:
     history             Show session history
     projects            List all defined projects
     stats               Show session statistics
+    config              Show configuration
     service             Manage pomo processes
 
 options:

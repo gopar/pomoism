@@ -70,3 +70,6 @@ class TestPomoHelpSnapshot:
 
     def test_pomo_stats_help(self):
         _assert_snapshot("pomo_stats", ["stats", "--help"])
+
+    def test_pomo_config_help(self):
+        _assert_snapshot("pomo_config", ["config", "--help"])
