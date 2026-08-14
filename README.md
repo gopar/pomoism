@@ -295,7 +295,7 @@ in `agent.toml`.
 | GET    | `/sessions`     | Sessions (optional `?project=`, `?from=`, `?to=`, `?state=`) |
 | GET    | `/stats`        | Aggregated statistics (optional `?project=`, `?from=`, `?to=`, `?include_archived=`) |
 | GET    | `/projects`     | All defined project names                   |
-| POST   | `/sessions`     | Upsert a session (LWW)                      |
+| POST   | `/sessions`     | Upsert a session (LWW; stale writes return `"applied": false`) |
 | POST   | `/sessions/end` | End the current session                     |
 
 Auth: optional bearer token via `POMO_TOKEN`.

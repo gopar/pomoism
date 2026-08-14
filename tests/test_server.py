@@ -64,15 +64,15 @@ class TestLWW:
         assert applied
         assert current["id"] == "b"
 
-    def test_all_writes_are_recorded(self):
-        # Given: a session "winner" is applied
+    def test_stale_new_session_recorded_but_current_stays_newer(self):
+        # Given: a session "winner" is applied at t=200
         server.apply_session(_session(200.0, sid="winner"))
-        # When: another session "loser" is applied
+        # When: a different session "loser" is applied at t=100 (older)
         applied, current = server.apply_session(_session(100.0, sid="loser"))
-        # Then: all writes are accepted (no stale rejection)
+        # Then: the new session is still recorded (history keeps everything)
         assert applied
-        assert current["id"] == "loser"
-        # Then: both sessions are recorded in the sessions table
+        # Then: but the current pointer stays with the newer session
+        assert current["id"] == "winner"
         with sqlite3.connect(server.DB_PATH) as conn:
             ids = {r[0] for r in conn.execute("SELECT id FROM sessions")}
         assert "loser" in ids
@@ -114,29 +114,44 @@ class TestLWW:
         assert row[0] == "ended"
         assert row[1] is not None
 
-    def test_last_write_wins_in_sessions_preserved_in_history(self):
+    def test_stale_same_id_write_is_rejected(self):
         # Given: session "a" applied at t=200
         server.apply_session(_session(200.0, sid="a"))
-        # When: same session "a" re-applied at t=100 (older, but last writer wins)
+        # When: the same session "a" is re-applied at t=100 (older)
         applied, _ = server.apply_session(_session(100.0, sid="a"))
-        # Then: the write is accepted
-        assert applied
-        # Then: sessions reflects the last write (t=100)
+        # Then: the stale write is rejected
+        assert applied is False
+        # Then: the stored row keeps the newer values (t=200)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT updated_at, state FROM sessions WHERE id = 'a'").fetchall()
         assert len(rows) == 1
-        assert rows[0]["updated_at"] == 100.0
-        # Then: session_history has both writes (audit trail preserved)
+        assert rows[0]["updated_at"] == 200.0
+        # Then: the rejected write is not recorded in history
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             hrows = conn.execute(
                 "SELECT updated_at, state FROM session_history WHERE id = 'a'"
                 " ORDER BY updated_at ASC"
             ).fetchall()
-        assert len(hrows) == 2
-        assert hrows[0]["updated_at"] == 100.0  # last write (applied second)
-        assert hrows[1]["updated_at"] == 200.0  # first write (applied first)
+        assert len(hrows) == 1
+        assert hrows[0]["updated_at"] == 200.0
+
+    def test_end_current_wins_with_older_client_stamp(self):
+        # Given: session "a" applied at t=100
+        server.apply_session(_session(100.0, sid="a"))
+        # When: end_current is called with an older client timestamp (t=50)
+        applied, _ = server.end_current(_session(50.0, sid="a"))
+        # Then: the explicit stop still wins (server bumps its own timestamp)
+        assert applied
+        assert common.is_idle(server.get_current_session())
+        with sqlite3.connect(server.DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT state, ended_at FROM sessions WHERE id = 'a' "
+                "ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+        assert row[0] == "ended"
+        assert row[1] is not None
 
     def test_name_survives_roundtrip(self):
         # Given: a session is created with a name

@@ -34,11 +34,12 @@ CLI are host processes by design.
 ## Critical invariants — easy to break
 
 - **LWW by `updated_at`**: every session mutation must set `updated_at = time.time()`
-  or the server/agent will silently drop it as stale. See `apply_session` in
+  or the server will reject it as stale (`applied: false`). See `apply_session` in
   `pomo/server.py` and `tick_timer` in `pomo/agent.py`. On the server this is race-safe:
-  the history insert + a WHERE-guarded pointer UPDATE (`? >= updated_at`) run in
+  a staleness pre-read, the history insert, and a WHERE-guarded pointer UPDATE run in
   one `BEGIN IMMEDIATE` transaction (WAL + `busy_timeout`), so concurrent writers
-  can't lose the newest write.
+  can't lose the newest write. `end_current` stamps its own `updated_at` server-side
+  so an explicit stop always wins.
 - **`ended` is a real state, not deletion**: stops propagate as an `ended` record
   (a file deletion can't sync). Keep it in `ALL_STATES`; `is_idle()` treats
   `idle`/`ended`/`None` as idle.
