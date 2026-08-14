@@ -114,13 +114,15 @@ class TestLWW:
         assert row[0] == "ended"
         assert row[1] is not None
 
-    def test_stale_same_id_write_is_rejected(self):
+    def test_stale_same_id_write_is_rejected(self, capsys):
         # Given: session "a" applied at t=200
         server.apply_session(_session(200.0, sid="a"))
         # When: the same session "a" is re-applied at t=100 (older)
         applied, _ = server.apply_session(_session(100.0, sid="a"))
         # Then: the stale write is rejected
         assert applied is False
+        # Then: the rejection is logged
+        assert "rejected stale" in capsys.readouterr().err
         # Then: the stored row keeps the newer values (t=200)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row

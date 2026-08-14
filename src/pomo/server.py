@@ -189,6 +189,9 @@ def apply_session(session: dict) -> tuple[bool, dict]:
             ).fetchone()
             if row is not None and row["updated_at"] > incoming:
                 conn.execute("ROLLBACK")
+                sys.stderr.write(
+                    f"pomo-server: rejected stale {common.sid8(session)} ({session['state']})\n"
+                )
                 return False, _current_session_locked(conn)
             conn.execute(
                 "INSERT INTO sessions "
@@ -374,22 +377,32 @@ def edit_session(session_id: str, fields: dict) -> dict:
     """Edit name/project on a session. Returns the updated session dict."""
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not row:
-            raise LookupError(f"session {session_id!r} not found")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if not row:
+                conn.execute("ROLLBACK")
+                raise LookupError(f"session {session_id!r} not found")
 
-        session = _row_to_session(row)
-        name = fields.get("name") if "name" in fields else session["name"]
-        project = fields.get("project") if "project" in fields else session["project"]
-        new_updated_at = time.time()
+            session = _row_to_session(row)
+            name = fields.get("name") if "name" in fields else session["name"]
+            project = fields.get("project") if "project" in fields else session["project"]
+            new_updated_at = time.time()
 
-        conn.execute(
-            "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
-            (name, project, new_updated_at, session_id),
-        )
-        srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        result = _row_to_session(srow)
-        _record_history(conn, result)
+            conn.execute(
+                "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
+                (name, project, new_updated_at, session_id),
+            )
+            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            result = _row_to_session(srow)
+            _record_history(conn, result)
+            conn.execute("COMMIT")
+        except BaseException:
+            # The not-found path raises after its own rollback; guard the
+            # second rollback so the original error propagates unchanged.
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
     sys.stderr.write(f"pomo-server: {session_id[:8]} edited\n")
     return result
 
@@ -398,26 +411,36 @@ def archive_session(session_id: str, session: dict) -> tuple[bool, dict]:
     """Mark a session as archived (soft-delete). Returns (True, current_session)."""
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not row:
-            raise ValueError(f"session {session_id!r} not found")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if not row:
+                conn.execute("ROLLBACK")
+                raise ValueError(f"session {session_id!r} not found")
 
-        existing = _row_to_session(row)
-        new_updated_at = time.time()
+            existing = _row_to_session(row)
+            new_updated_at = time.time()
 
-        conn.execute(
-            "UPDATE sessions SET state = 'archived', ended_at = ?, updated_at = ? WHERE id = ?",
-            (existing.get("ended_at") or time.time(), new_updated_at, session_id),
-        )
-        conn.execute(
-            "UPDATE current SET session_id = ?, updated_at = ? "
-            "WHERE singleton = 0 AND session_id = ?",
-            (session_id, new_updated_at, session_id),
-        )
+            conn.execute(
+                "UPDATE sessions SET state = 'archived', ended_at = ?, updated_at = ? WHERE id = ?",
+                (existing.get("ended_at") or time.time(), new_updated_at, session_id),
+            )
+            conn.execute(
+                "UPDATE current SET session_id = ?, updated_at = ? "
+                "WHERE singleton = 0 AND session_id = ?",
+                (session_id, new_updated_at, session_id),
+            )
+            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if srow:
+                _record_history(conn, _row_to_session(srow))
+            conn.execute("COMMIT")
+        except BaseException:
+            # The not-found path raises after its own rollback; guard the
+            # second rollback so the original error propagates unchanged.
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         sys.stderr.write(f"pomo-server: {session_id[:8]} archived\n")
-        srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if srow:
-            _record_history(conn, _row_to_session(srow))
         current = _current_session_locked(conn)
     return True, current
 
