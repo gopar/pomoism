@@ -147,12 +147,17 @@ def _row_to_session(row: sqlite3.Row) -> dict:
     }
 
 
+def _fetch_session(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
+    """Return the sessions row for session_id, or None if absent."""
+    return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+
+
 def _current_session_locked(conn: sqlite3.Connection) -> dict:
     """Read the current session using an already-open connection."""
     row = conn.execute("SELECT session_id FROM current WHERE singleton = 0").fetchone()
     if not row or not row["session_id"]:
         return common.idle_session()
-    srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (row["session_id"],)).fetchone()
+    srow = _fetch_session(conn, row["session_id"])
     if not srow:
         return common.idle_session()
     session = _row_to_session(srow)
@@ -379,7 +384,7 @@ def edit_session(session_id: str, fields: dict) -> dict:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         try:
-            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            row = _fetch_session(conn, session_id)
             if not row:
                 conn.execute("ROLLBACK")
                 raise LookupError(f"session {session_id!r} not found")
@@ -393,7 +398,10 @@ def edit_session(session_id: str, fields: dict) -> dict:
                 "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
                 (name, project, new_updated_at, session_id),
             )
-            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            srow = _fetch_session(conn, session_id)
+            # Unreachable in practice: the row exists within this transaction.
+            if srow is None:
+                raise LookupError(f"session {session_id!r} not found")
             result = _row_to_session(srow)
             _record_history(conn, result)
             conn.execute("COMMIT")
@@ -413,7 +421,7 @@ def archive_session(session_id: str, session: dict) -> tuple[bool, dict]:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         try:
-            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            row = _fetch_session(conn, session_id)
             if not row:
                 conn.execute("ROLLBACK")
                 raise ValueError(f"session {session_id!r} not found")
@@ -430,7 +438,7 @@ def archive_session(session_id: str, session: dict) -> tuple[bool, dict]:
                 "WHERE singleton = 0 AND session_id = ?",
                 (session_id, new_updated_at, session_id),
             )
-            srow = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            srow = _fetch_session(conn, session_id)
             if srow:
                 _record_history(conn, _row_to_session(srow))
             conn.execute("COMMIT")
