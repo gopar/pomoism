@@ -38,8 +38,18 @@ CLI are host processes by design.
   `pomo/server.py` and `tick_timer` in `pomo/agent.py`. On the server this is race-safe:
   a staleness pre-read, the history insert, and a WHERE-guarded pointer UPDATE run in
   one `BEGIN IMMEDIATE` transaction (WAL + `busy_timeout`), so concurrent writers
-  can't lose the newest write. `end_current` stamps its own `updated_at` server-side
-  so an explicit stop always wins.
+  can't lose the newest write. `end_current` uses `apply_session(..., force=True)`,
+  which stamps `updated_at` server-side and clamps it above the stored row, so an
+  explicit stop always wins even against a clock-skewed client.
+- **`ended`/`archived` are terminal**: `apply_session` rejects non-terminal writes
+  for a row already `ended`/`archived` — a just-woken machine's late overtime push
+  must not resurrect a finished session.
+- **`current` points at the latest-started session**: the pointer only moves to a
+  *different* session when its `start_epoch` is later than the pointer session's,
+  so a stale overtime push for an old session can't steal `current` from a newer
+  one. Agents adopt a different-id remote session when `remote.start_epoch >
+  local.start_epoch` (clock-skew safe) or when its `updated_at` is newer, and clear
+  the cache when an idle marker carries their exact `session_id`.
 - **`ended` is a real state, not deletion**: stops propagate as an `ended` record
   (a file deletion can't sync). Keep it in `ALL_STATES`; `is_idle()` treats
   `idle`/`ended`/`None` as idle.

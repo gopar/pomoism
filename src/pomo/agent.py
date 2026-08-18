@@ -88,13 +88,22 @@ def poll_server(cfg: dict) -> None:
     local = common.read_cache()
     if common.is_idle(remote):
         if local and not common.is_idle(local):
-            if _updated_at(remote) > _updated_at(local):
+            # The server reporting this exact session ended is authoritative,
+            # even if its timestamp is older (clock skew); otherwise LWW.
+            ended_ours = remote.get("session_id") == local.get("id")
+            if ended_ours or _updated_at(remote) > _updated_at(local):
                 common.clear_cache()
             return
         if local is not None:
             common.clear_cache()
         return
-    if _updated_at(remote) > _updated_at(local):
+    newer_timestamp = _updated_at(remote) > _updated_at(local)
+    later_started = (
+        local is not None
+        and remote.get("id") != local.get("id")
+        and float(remote.get("start_epoch") or 0) > float(local.get("start_epoch") or 0)
+    )
+    if newer_timestamp or later_started:
         remote_started_elsewhere = (
             not local or remote.get("id") != (local or {}).get("id")
         ) and remote.get("origin_machine") != cfg["machine_name"]

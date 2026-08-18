@@ -155,6 +155,76 @@ class TestLWW:
         assert row[0] == "ended"
         assert row[1] is not None
 
+    def test_end_wins_against_future_client_timestamp(self):
+        # Given: a row written with a client timestamp far ahead of the
+        # server clock (a machine with clock skew)
+        future = time.time() + 3600.0
+        server.apply_session(_session(future, sid="a"))
+        # When: another machine ends the session (its client stamp lags)
+        applied, _ = server.end_current(_session(future - 60.0, sid="a"))
+        # Then: the explicit stop wins; the row is ended and its timestamp
+        # is clamped above the skewed stored value
+        assert applied
+        assert common.is_idle(server.get_current_session())
+        with sqlite3.connect(server.DB_PATH) as conn:
+            row = conn.execute("SELECT state, updated_at FROM sessions WHERE id = 'a'").fetchone()
+        assert row[0] == "ended"
+        assert row[1] > future
+
+    def test_ended_session_cannot_be_resurrected(self):
+        # Given: a session that is ended on the server
+        server.apply_session(_session(100.0, sid="a"))
+        server.end_current(_session(200.0, sid="a"))
+        # When: a just-woken machine pushes a late overtime transition with a
+        # newer timestamp
+        applied, current = server.apply_session(
+            _session(time.time() + 10.0, state="overtime", sid="a")
+        )
+        # Then: the write is rejected and the session stays ended
+        assert applied is False
+        assert common.is_idle(current)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            row = conn.execute("SELECT state FROM sessions WHERE id = 'a'").fetchone()
+        assert row[0] == "ended"
+
+    def test_late_overtime_cannot_steal_current_from_newer_session(self):
+        # Given: a pomodoro started at epoch 1000 holds the current pointer
+        server.apply_session(_session(100.0, sid="pomo"))
+        # And: a break started later (epoch 2000) takes over current
+        brk = _session(200.0, sid="break")
+        brk["start_epoch"] = 2000
+        server.apply_session(brk)
+        assert server.get_current_session()["id"] == "break"
+        # When: a sleeping machine wakes and pushes a late overtime transition
+        # for the old pomodoro with a newer timestamp
+        late = _session(300.0, state="overtime", sid="pomo")
+        applied, current = server.apply_session(late)
+        # Then: the row is recorded (history keeps everything), but current
+        # stays with the later-started break
+        assert applied
+        assert current["id"] == "break"
+
+    def test_ending_pomodoro_then_starting_break_survives_late_overtime(self):
+        # Given: Mozilla starts a pomodoro at epoch 1000
+        server.apply_session(_session(100.0, sid="pomo"))
+        # When: a sleeping laptop wakes and pushes a late overtime transition
+        # (newer timestamp, skewed clock)
+        applied, current = server.apply_session(_session(300.0, state="overtime", sid="pomo"))
+        assert applied
+        assert current["id"] == "pomo"
+        # And: Mozilla ends the pomodoro, then starts a break (epoch 2000)
+        applied_end, _ = server.end_current(_session(150.0, sid="pomo"))
+        assert applied_end
+        brk = _session(150.0, sid="break")
+        brk["start_epoch"] = 2000
+        applied_brk, current = server.apply_session(brk)
+        # Then: the break is current and the pomodoro stays ended
+        assert applied_brk
+        assert current["id"] == "break"
+        with sqlite3.connect(server.DB_PATH) as conn:
+            row = conn.execute("SELECT state FROM sessions WHERE id = 'pomo'").fetchone()
+        assert row[0] == "ended"
+
     def test_name_survives_roundtrip(self):
         # Given: a session is created with a name
         s = _session(100.0, sid="named")

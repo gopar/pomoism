@@ -296,7 +296,7 @@ in `agent.toml`.
 | GET    | `/stats`        | Aggregated statistics (optional `?project=`, `?from=`, `?to=`, `?include_archived=`) |
 | GET    | `/projects`     | All defined project names                   |
 | POST   | `/sessions`     | Upsert a session (LWW; stale writes return `"applied": false`) |
-| POST   | `/sessions/end` | End the current session                     |
+| POST   | `/sessions/end` | End the current session (always wins; server-clamped timestamp) |
 
 Auth: optional bearer token via `POMO_TOKEN`.
 
@@ -307,7 +307,11 @@ Auth: optional bearer token via `POMO_TOKEN`.
 Three small processes share `pomo/common.py`:
 
 - **`pomo/server.py`** — HTTP/JSON source of truth backed by SQLite with append-only
-  history. Conflicts resolve last-write-wins by timestamp. Runs on one
+  history. Row conflicts resolve last-write-wins by timestamp; `ended` is
+  terminal (a session can't be resurrected) and an explicit stop always wins
+  because the server clamps its timestamp. `current` always points at the
+  latest-started active session, so a stale overtime push from a machine that
+  just woke from sleep can't steal it from a newer session. Runs on one
   home-base machine.
 - **`pomo/agent.py`** — per-machine daemon. Polls the server, owns the local
   countdown→overtime timer, fires hooks, flushes the offline outbox.

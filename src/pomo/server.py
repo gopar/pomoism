@@ -2,8 +2,9 @@
 """Pomodoro sync server. Stdlib only (http.server + sqlite3).
 
 Single source of truth for the current pomodoro session across machines.
-Stores an append-only history; "current" is the latest non-ended session.
-Conflict resolution is last-write-wins by `updated_at`.
+Stores an append-only history; "current" is the latest-started active
+session. Row conflicts resolve last-write-wins by `updated_at`; `ended` is
+terminal and an explicit stop always wins (server-clamped timestamp).
 
 Endpoints:
     GET  /health              -> {"ok": true}
@@ -171,12 +172,20 @@ def get_current_session() -> dict:
         return _current_session_locked(conn)
 
 
-def apply_session(session: dict) -> tuple[bool, dict]:
+def apply_session(session: dict, force: bool = False) -> tuple[bool, dict]:
     """Insert/replace current session. Returns (True, current_session).
 
     LWW by `updated_at`: a write older than the stored row for its id is
-    rejected (no history row, no pointer change). Writers serialize via
+    rejected (no history row, no pointer change), unless `force` is set
+    (end_current uses it so an explicit stop always wins, even against a
+    client timestamp inflated by clock skew). Writers serialize via
     BEGIN IMMEDIATE, so the staleness pre-read is race-free.
+
+    `ended`/`archived` are terminal: a later non-terminal write for such a
+    session is rejected so a just-woken machine can't resurrect it. The
+    current pointer only moves to a *different* session when that session
+    started later, so a late overtime push for an old session can't steal
+    `current` from a newer one.
     """
     required = ("id", "state", "start_epoch", "duration", "origin_machine", "updated_at")
     for key in required:
@@ -190,14 +199,24 @@ def apply_session(session: dict) -> tuple[bool, dict]:
         try:
             incoming = float(session["updated_at"])
             row = conn.execute(
-                "SELECT updated_at FROM sessions WHERE id = ?", (session["id"],)
+                "SELECT updated_at, state FROM sessions WHERE id = ?", (session["id"],)
             ).fetchone()
-            if row is not None and row["updated_at"] > incoming:
-                conn.execute("ROLLBACK")
-                sys.stderr.write(
-                    f"pomo-server: rejected stale {common.sid8(session)} ({session['state']})\n"
-                )
-                return False, _current_session_locked(conn)
+            if row is not None:
+                if force:
+                    # Clamp so the forced write is never older than the stored
+                    # row, keeping `updated_at` monotonic for downstream LWW.
+                    if row["updated_at"] >= incoming:
+                        incoming = row["updated_at"] + 1e-6
+                        session["updated_at"] = incoming
+                elif row["updated_at"] > incoming or (
+                    row["state"] in ("ended", "archived")
+                    and session["state"] not in ("ended", "archived")
+                ):
+                    conn.execute("ROLLBACK")
+                    sys.stderr.write(
+                        f"pomo-server: rejected stale {common.sid8(session)} ({session['state']})\n"
+                    )
+                    return False, _current_session_locked(conn)
             conn.execute(
                 "INSERT INTO sessions "
                 "(id, state, start_epoch, duration, origin_machine, "
@@ -227,11 +246,34 @@ def apply_session(session: dict) -> tuple[bool, dict]:
                 ),
             )
             _record_history(conn, session)
-            conn.execute(
-                "UPDATE current SET session_id = ?, updated_at = ? "
-                "WHERE singleton = 0 AND updated_at <= ?",
-                (session["id"], incoming, incoming),
-            )
+            # Decide whether this write may move the `current` pointer.
+            pointer = conn.execute(
+                "SELECT c.session_id, s.start_epoch FROM current c "
+                "LEFT JOIN sessions s ON s.id = c.session_id "
+                "WHERE c.singleton = 0"
+            ).fetchone()
+            ptr_id = pointer["session_id"] if pointer else None
+            ptr_start = pointer["start_epoch"] if pointer else None
+            if (
+                ptr_id is None
+                or ptr_id == session["id"]
+                or (ptr_start is not None and int(session["start_epoch"]) == ptr_start)
+            ):
+                # Same session, empty pointer, or ambiguous same-second start:
+                # plain LWW by updated_at.
+                conn.execute(
+                    "UPDATE current SET session_id = ?, updated_at = ? "
+                    "WHERE singleton = 0 AND updated_at <= ?",
+                    (session["id"], incoming, incoming),
+                )
+            elif ptr_start is None or int(session["start_epoch"]) > ptr_start:
+                # A genuinely later-started session takes current even if its
+                # client timestamp lags (clock skew).
+                conn.execute(
+                    "UPDATE current SET session_id = ?, updated_at = ? WHERE singleton = 0",
+                    (session["id"], incoming),
+                )
+            # else: an older session must not steal current from a newer one.
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -246,11 +288,12 @@ def end_current(session: dict) -> tuple[bool, dict]:
     ended = dict(session)
     ended["state"] = "ended"
     # Server stamps the timestamp so an explicit stop always wins, even if
-    # the client's own updated_at lags the stored row.
+    # the client's own updated_at lags the stored row; `force` additionally
+    # clamps it above any clock-skewed stored timestamp.
     ended["updated_at"] = time.time()
     ended.setdefault("ended_at", time.time())
     ended["ended_at"] = ended["ended_at"] or time.time()
-    return apply_session(ended)
+    return apply_session(ended, force=True)
 
 
 def get_sessions(

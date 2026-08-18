@@ -181,6 +181,37 @@ class TestPollServer:
         # Then: local cache is cleared because the server's end is newer
         assert common.is_idle(common.read_cache())
 
+    def test_idle_marker_for_local_session_clears_despite_older_timestamp(self):
+        # Given: a local session whose updated_at is ahead of the server
+        # (the other machine's clock lags)
+        local = common.new_session("pomodoro", 1000, 60, "desktop")
+        local["updated_at"] = 900.0
+        common.write_cache(local)
+        # And: the server reports idle for this exact session with an older
+        # timestamp
+        remote_idle = {"state": "idle", "updated_at": 100.0, "session_id": local["id"]}
+        with patch.object(common, "get_current", return_value=remote_idle):
+            # When: the agent polls the server
+            agent.poll_server(self.cfg)
+        # Then: the server having this exact session ended is authoritative
+        assert common.is_idle(common.read_cache())
+
+    def test_adopts_remote_newer_started_session_despite_older_timestamp(self):
+        # Given: a local pomodoro cached with a skewed (future) timestamp
+        local = common.new_session("pomodoro", 1000, 60, "laptop")
+        local["updated_at"] = 900.0
+        common.write_cache(local)
+        # And: the server has a break that started later, but with an older
+        # timestamp (the other machine's clock lags)
+        remote = common.new_session("break", 2000, 20, "desktop")
+        remote["updated_at"] = 100.0
+        with patch.object(common, "get_current", return_value=remote):
+            # When: the agent polls the server
+            agent.poll_server(self.cfg)
+        # Then: the later-started remote session is adopted
+        assert common.read_cache()["id"] == remote["id"]
+        assert len(self.adopted) == 1
+
 
 class TestOnRemoteAdopt:
     """Tests for on_remote_adopt: firing the right hooks for remote sessions."""
