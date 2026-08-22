@@ -13,7 +13,6 @@ one machine and see the countdown and get the overtime warning on another.
   sounds) is an executable script you control. Language-agnostic.
 - **Project tagging** — tag sessions to projects: `pomo 25 -p website`.
   Filter history by project, see everything you've worked on.
-- **Zero dependencies** — Python 3.11+ stdlib only.
 
 ---
 

@@ -139,5 +139,3 @@ When bumping the version:
 - Update the `VERSION` file
 - Commit as `vX.Y.Z`
 - (optional) `git tag vX.Y.Z`
-
-See `README.md` for the setup/launchd flow and hook details.
