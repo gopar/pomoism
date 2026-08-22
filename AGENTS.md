@@ -1,8 +1,7 @@
 # AGENTS.md
 
-Multi-machine pomodoro sync service. Python **stdlib only** — no third-party
-deps, no package manager, no build/lint/test config. Requires Python 3.11+
-(`tomllib`); developed/run on macOS.
+Multi-machine pomodoro sync service. Requires Python 3.11+ (`tomllib`).
+Developed/run on macOS.
 
 Tests live in `tests/` (pytest + `unittest.mock`). Run them with:
 
@@ -13,9 +12,7 @@ by a test, run the processes directly (see below).
 Side effects (`shortcuts`, `say`, `afplay`, Emacs) are macOS-specific.
 
 CI (`.github/workflows/ci.yml`) runs the `unittest` suite on Python 3.11–3.14
-plus a `compileall` syntax gate (Ubuntu). Only the **server** is containerized
-(`Dockerfile` / `docker-compose.yml`, DB on the `/data` volume); agents and the
-CLI are host processes by design.
+plus a `compileall` syntax gate (Ubuntu).
 
 ## Architecture (3 processes in the `pomo` package)
 
@@ -83,7 +80,7 @@ CLI are host processes by design.
 - Paths in `pomo/common.py`: cache `~/.cache/pomo/`, DB `~/.local/share/pomo/pomo.db`.
 
 ## Testing Philosophy
-- When adding tests, do your best to minimize mock usage.
+- When adding tests, do your best to minimize mocking parts of the system unless its required.
 - Prefer tests that test the behavior and not the internals.
 - When fixing a bug, write a test to verify existing bug and then re-run it to verify it has been fix.
 - Tests isolate all state onto a temp dir via `tests/_util.py` (patches path

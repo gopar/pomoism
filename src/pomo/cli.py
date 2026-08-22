@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""Pomodoro CLI. Drop-in replacement for the old `pomo` bash script.
-
-UX preserved:
-    pomo <minutes>        Start a pomodoro
-    pomo break <minutes>  Start a break
-    pomo clear            Stop & clear (prompts for a break)
-
-Behavior:
-  - Writes the new session to the local cache immediately (works offline)
-    and pushes to the server; if the server is
-    unreachable the push is queued in the outbox for the agent to flush.
-  - Fires lifecycle hooks for the event (pomodoro_start / break_start /
-    session_stop). All side effects live in hooks (see hooks.py); the agent
-    owns only the overtime timer.
-"""
-
 from __future__ import annotations
 
 import argparse
