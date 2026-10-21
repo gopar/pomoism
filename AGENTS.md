@@ -11,15 +11,20 @@ Add tests under `tests/` to verify changes; for anything that can't be covered
 by a test, run the processes directly (see below).
 Side effects (`shortcuts`, `say`, `afplay`, Emacs) are macOS-specific.
 
-CI (`.github/workflows/ci.yml`) runs the `unittest` suite on Python 3.11–3.14
-plus a `compileall` syntax gate (Ubuntu).
+CI (`.github/workflows/ci.yml`) runs the pytest suite on Python 3.11–3.14,
+a Django system check, ruff lint/format, ty, and a `compileall` syntax gate
+(Ubuntu).
 
 ## Architecture (3 processes in the `pomo` package)
 
-- `pomo/server.py` — HTTP/JSON source of truth (SQLite, last-write-wins). One instance
-  on a "home-base" machine. Endpoints: `GET /health`, `GET /version`, `GET /current`,
-  `GET /sessions` (optional `?project=`), `GET /projects`, `POST /sessions`,
-  `POST /sessions/end`.
+- `pomo/web/` — Django HTTP/JSON server. It exposes the legacy API paths plus
+  `/api/` aliases. The persistence layer is the stdlib `sqlite3` store in
+  `pomo/server.py` (last-write-wins), deliberately kept raw so its
+  `BEGIN IMMEDIATE` race guarantees survive. Django owns migrations and auth
+  tables. One instance on a "home-base" machine. Endpoints: `GET /health`,
+  `GET /version`, `GET /current`, `GET /sessions` (optional `?project=`,
+  `?from=`, `?to=`, `?state=`), `GET /projects`, `GET /stats`, `POST /sessions`,
+  `POST /sessions/end`, `PATCH /sessions/<id>`, `POST /sessions/<id>/archive`.
 - `pomo/agent.py` — per-machine daemon. Polls `/current`, owns the countdown→overtime
   timer, fires side effects, flushes the offline outbox.
 - `pomo/cli.py` — the CLI (`pomo start <min>`, `pomo break <min>`, `pomo clear`). Writes the
@@ -27,6 +32,8 @@ plus a `compileall` syntax gate (Ubuntu).
 
 `pomo/common.py` is imported by all three. Install with `pip install -e .` or
 `uv tool install` to place `pomo`, `pomo-agent`, and `pomo-server` on `PATH`.
+`pomo-server` starts Django + waitress and auto-migrates; it also dispatches
+Django management commands (`pomo-server migrate`, `createsuperuser`, ...).
 
 ## Critical invariants — easy to break
 
@@ -38,6 +45,11 @@ plus a `compileall` syntax gate (Ubuntu).
   can't lose the newest write. `end_current` uses `apply_session(..., force=True)`,
   which stamps `updated_at` server-side and clamps it above the stored row, so an
   explicit stop always wins even against a clock-skewed client.
+- **All session writes go through `pomo/server.py`**: Django views may read
+  through the ORM, but session mutations must call the store functions
+  (`apply_session`, `end_current`, `edit_session`, `archive_session`) so LWW,
+  history, and the `current` pointer stay correct. Do not write `Session` rows
+  from Django forms/admin.
 - **`ended`/`archived` are terminal**: `apply_session` rejects non-terminal writes
   for a row already `ended`/`archived` — a just-woken machine's late overtime push
   must not resurrect a finished session.
@@ -76,15 +88,26 @@ plus a `compileall` syntax gate (Ubuntu).
   `pomo/common.py` (the single source of truth for config docs; there is no
   separate sample file).
 - Env overrides: `POMO_SERVER_URL` (agent/CLI), `POMO_TOKEN` (bearer auth, both
-  ends), `POMO_PORT`/`POMO_HOST`/`POMO_DB_PATH` (server).
-- Paths in `pomo/common.py`: cache `~/.cache/pomo/`, DB `~/.local/share/pomo/pomo.db`.
+  ends), `POMO_PORT`/`POMO_HOST`/`POMO_DB_PATH` (server),
+  `POMO_SECRET_KEY`/`POMO_SECRET_KEY_FILE`, `POMO_ALLOWED_HOSTS`,
+  `POMO_DEBUG`, `POMO_TIME_ZONE`, `POMO_CSRF_TRUSTED_ORIGINS`, and
+  `POMO_AUTO_MIGRATE` (Django server).
+- Paths in `pomo/common.py`: cache `~/.cache/pomo/`, DB `~/.local/share/pomo/pomo.db`,
+  generated Django secret `~/.config/pomo/django_secret_key`.
+- Migrations: `pomo/web/migrations/0001_initial.py` must keep matching the
+  legacy `sessions`/`current` tables so `migrate --fake-initial` can adopt an
+  existing DB. Index/history migration operations must be idempotent because
+  the store's `init_db()` also creates indexes.
 
 ## Testing Philosophy
 - When adding tests, do your best to minimize mocking parts of the system unless its required.
 - Prefer tests that test the behavior and not the internals.
 - When fixing a bug, write a test to verify existing bug and then re-run it to verify it has been fix.
-- Tests isolate all state onto a temp dir via `tests/_util.py` (patches path
-  globals in `common`/`server`); they never touch real `~`.`
+- Tests isolate all state onto a temp dir via `tests/conftest.py` (patches path
+  globals in `common`/`server`); Django tests use `tests/settings.py` so they
+  never touch real `~`.
+- API tests use the Django test client against the raw store; keep
+  `tests/test_server.py` as the coverage for LWW/concurrency invariants.
 - When adding tests use Gherkin style comments (Given, When, Then, etc)
 
 ## Pre-commit hooks
@@ -116,7 +139,7 @@ ruff check . --fix    # auto-fix (safe fixes only)
 Type checking uses `ty` (fast, stdlib-friendly). Run on source only:
 
 ```sh
-ty check pomo
+ty check src/pomo
 ```
 
 CI enforces all three. Dev install includes ruff and ty: `uv sync --dev`

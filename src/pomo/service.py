@@ -36,7 +36,22 @@ def _pomo_env() -> dict[str, str]:
     return {
         k: v
         for k, v in os.environ.items()
-        if k.startswith(("POMO_SERVER_URL", "POMO_TOKEN", "POMO_PORT", "POMO_HOST", "POMO_DB_PATH"))
+        if k.startswith(
+            (
+                "POMO_SERVER_URL",
+                "POMO_TOKEN",
+                "POMO_PORT",
+                "POMO_HOST",
+                "POMO_DB_PATH",
+                "POMO_SECRET_KEY",
+                "POMO_SECRET_KEY_FILE",
+                "POMO_ALLOWED_HOSTS",
+                "POMO_DEBUG",
+                "POMO_TIME_ZONE",
+                "POMO_CSRF_TRUSTED_ORIGINS",
+                "POMO_AUTO_MIGRATE",
+            )
+        )
     }
 
 

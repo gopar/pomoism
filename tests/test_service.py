@@ -4,6 +4,7 @@ pure functions are tested directly."""
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -71,9 +72,9 @@ class TestEnv:
 
     def test_pomo_env_empty_when_no_vars(self, monkeypatch):
         # Given: no POMO_* vars set
-        monkeypatch.delenv("POMO_SERVER_URL", raising=False)
-        monkeypatch.delenv("POMO_TOKEN", raising=False)
-        monkeypatch.delenv("POMO_DB_PATH", raising=False)
+        for key in list(os.environ):
+            if key.startswith("POMO_"):
+                monkeypatch.delenv(key)
         # When: _pomo_env is called
         env = service._pomo_env()
         # Then: empty dict

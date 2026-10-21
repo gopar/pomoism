@@ -18,10 +18,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install package and test dependencies
+        run: pip install -e . pytest pytest-django
       - name: Run tests
         run: pytest -q
+      - name: Django system check
+        run: POMO_SECRET_KEY=ci python -m django check --settings=pomo.web.settings
 
   compile:
     runs-on: ubuntu-latest
@@ -40,11 +42,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install package, ruff, and ty
+        run: pip install -e . ruff ty
       - name: Ruff check
         run: ruff check .
       - name: Ruff format check
         run: ruff format --check .
       - name: Type check
-        run: pip install ty && ty check src/pomo
+        run: ty check src/pomo

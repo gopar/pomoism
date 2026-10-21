@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.1
+    rev: v0.17.1
     hooks:
       - id: ruff
         args: [--fix]
@@ -14,7 +14,10 @@ repos:
         language: python
         types: [python]
         pass_filenames: false
-        additional_dependencies: [ty]
+        additional_dependencies:
+          - ty
+          - "Django>=5.2.8,<6.0"
+          - "waitress>=3.0"
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

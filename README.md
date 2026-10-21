@@ -184,11 +184,16 @@ options:
    pomo service server install
    ```
 
-   Docker (use *instead of* the service — run one, not both):
+   The server uses Django. `pomo-server` applies database migrations
+   automatically on startup (including `--fake-initial` adoption of an
+   existing pomo SQLite database), then serves with waitress. Back up
+   `~/.local/share/pomo/pomo.db` before upgrading from an older release.
+   If you run migrations manually against an existing database, use
+   `pomo-server migrate --fake-initial`.
 
-   ```sh
-   docker compose up -d
-   ```
+   Django needs a secret key. If `POMO_SECRET_KEY` is not set, one is
+   generated in `~/.config/pomo/django_secret_key`. Set it explicitly if you
+   run multiple server instances.
 
 3. **Every machine — start the agent:**
 
@@ -266,9 +271,13 @@ in `agent.toml`.
 | Config         | `~/.config/pomo/agent.toml`                 |
 | Cache          | `~/.cache/pomo/` (session + offline outbox)  |
 | Server DB      | `~/.local/share/pomo/pomo.db` (`POMO_DB_PATH`) |
+| Django secret  | `POMO_SECRET_KEY` or `~/.config/pomo/django_secret_key` |
+| Allowed hosts  | `POMO_ALLOWED_HOSTS` (default `*`)           |
 | Server URL     | `POMO_SERVER_URL` (agent/CLI)                |
 | Bearer token   | `POMO_TOKEN` (server + agents)               |
+| Server bind    | `POMO_HOST` (default `0.0.0.0`)              |
 | Server port    | `POMO_PORT` (default 8787)                   |
+| Auto-migrate   | `POMO_AUTO_MIGRATE` (default `1`)            |
 
 ### Config keys (`agent.toml`)
 
@@ -296,7 +305,10 @@ in `agent.toml`.
 | GET    | `/projects`     | All defined project names                   |
 | POST   | `/sessions`     | Upsert a session (LWW; stale writes return `"applied": false`) |
 | POST   | `/sessions/end` | End the current session (always wins; server-clamped timestamp) |
+| PATCH  | `/sessions/<id>` | Edit a session's name/project (LWW)       |
+| POST   | `/sessions/<id>/archive` | Soft-delete a session (LWW)       |
 
+Every route is also available under `/api/` (for example `/api/sessions`).
 Auth: optional bearer token via `POMO_TOKEN`.
 
 ---
@@ -305,13 +317,11 @@ Auth: optional bearer token via `POMO_TOKEN`.
 
 Three small processes share `pomo/common.py`:
 
-- **`pomo/server.py`** — HTTP/JSON source of truth backed by SQLite with append-only
-  history. Row conflicts resolve last-write-wins by timestamp; `ended` is
-  terminal (a session can't be resurrected) and an explicit stop always wins
-  because the server clamps its timestamp. `current` always points at the
-  latest-started active session, so a stale overtime push from a machine that
-  just woke from sleep can't steal it from a newer session. Runs on one
-  home-base machine.
+- **`pomo/web/`** — Django HTTP/JSON server. The JSON protocol is unchanged, and
+  the persistence layer is still the stdlib `sqlite3` store in `pomo/server.py`
+  so last-write-wins and the current-pointer race guarantees are preserved.
+  Django also owns migrations and authentication tables. Runs on one home-base
+  machine.
 - **`pomo/agent.py`** — per-machine daemon. Polls the server, owns the local
   countdown→overtime timer, fires hooks, flushes the offline outbox.
 - **`pomo/cli.py`** — the CLI. Writes the local cache immediately, pushes to the
@@ -327,22 +337,30 @@ Because the timer and hooks are local, everything works with no network.
 
 ## Development
 
-Tests are `pytest` (stdlib `unittest.mock` for patches):
+Tests are `pytest` (stdlib `unittest.mock` for patches), with
+`pytest-django` for the server API tests:
 
 ```sh
+uv sync --dev
 pytest
 ```
 
 Dev install includes ruff and ty:
 
 ```sh
-uv sync --dev
-ruff check . ; ruff format . ; ty check pomo
+ruff check . ; ruff format . ; ty check src/pomo
+```
+
+Useful server checks:
+
+```sh
+POMO_SECRET_KEY=dev python -m django check --settings=pomo.web.settings
+POMO_SECRET_KEY=dev python -m django makemigrations --check --dry-run --settings=pomo.web.settings
 ```
 
 CI runs the test suite on Python 3.11–3.14, plus ruff lint/format, ty type
-check, and a `compileall` syntax gate. See `AGENTS.md` for architecture
-invariants.
+check, a Django system check, and a `compileall` syntax gate. See `AGENTS.md`
+for architecture invariants.
 
 ---
 

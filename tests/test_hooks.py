@@ -4,6 +4,7 @@ context, and stay best-effort."""
 from __future__ import annotations
 
 import json
+import os
 import stat
 
 import pytest
@@ -121,8 +122,11 @@ class TestHooks:
         # Then: POMO_SESSION_PROJECT is set
         assert out.read_text(encoding="utf-8") == "website"
 
-    def test_build_env_has_expected_pomo_keys(self):
-        # Given: a session with a project
+    def test_build_env_has_expected_pomo_keys(self, monkeypatch):
+        # Given: a session with a project and no inherited POMO_* variables
+        for key in list(os.environ):
+            if key.startswith("POMO_"):
+                monkeypatch.delenv(key)
         session = common.new_session("pomodoro", 1, 60, "laptop", project="website")
         # When: env is built
         env = hooks._build_env("pomodoro_start", session, remote=False)
