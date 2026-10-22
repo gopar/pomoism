@@ -50,6 +50,8 @@ def _pomo_env() -> dict[str, str]:
                 "POMO_TIME_ZONE",
                 "POMO_CSRF_TRUSTED_ORIGINS",
                 "POMO_AUTO_MIGRATE",
+                "POMO_STATIC_ROOT",
+                "POMO_AUTO_COLLECTSTATIC",
             )
         )
     }

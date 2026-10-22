@@ -665,3 +665,128 @@ class TestValidateDate:
     def test_empty_string_raises(self):
         with pytest.raises(ValueError, match="invalid date"):
             server._validate_date("")
+
+
+class TestCreateSession:
+    """create_session inserts historical records without stealing current."""
+
+    @pytest.fixture(autouse=True)
+    def _init_db(self, isolated, monkeypatch):
+        monkeypatch.setattr(server, "DB_PATH", isolated / "data" / "pomo.db")
+        server.init_db()
+
+    def test_create_does_not_move_empty_current_pointer(self):
+        # Given: no active session
+        assert common.is_idle(server.get_current_session())
+
+        # When: a completed historical session is created
+        created = server.create_session(
+            kind="pomodoro",
+            start_epoch=int(time.time()) - 3600,
+            duration=1500,
+            project="website",
+        )
+
+        # Then: the row exists but current stays idle
+        assert server.get_session(created["id"]) is not None
+        assert common.is_idle(server.get_current_session())
+
+    def test_create_does_not_replace_active_current(self):
+        # Given: an active session is current
+        active = common.new_session("pomodoro", int(time.time()), 1500, "laptop")
+        server.apply_session(active)
+
+        # When: a historical session is created
+        server.create_session(
+            kind="break",
+            start_epoch=int(time.time()) - 7200,
+            duration=300,
+        )
+
+        # Then: the active session remains current
+        assert server.get_current_session()["id"] == active["id"]
+
+    def test_create_sets_ended_at_from_duration(self):
+        start = int(time.time()) - 600
+        created = server.create_session(kind="pomodoro", start_epoch=start, duration=300)
+        assert created["ended_at"] == start + 300
+
+    def test_create_rejects_invalid_kind(self):
+        with pytest.raises(ValueError, match="invalid kind"):
+            server.create_session(kind="meeting", start_epoch=1, duration=60)
+
+    def test_create_rejects_nonpositive_duration(self):
+        with pytest.raises(ValueError, match="duration"):
+            server.create_session(kind="pomodoro", start_epoch=1, duration=0)
+
+    def test_get_session_returns_none_for_missing(self):
+        assert server.get_session("missing") is None
+
+
+class TestEditSessionTiming:
+    """Completed sessions can be corrected; active timing stays locked."""
+
+    @pytest.fixture(autouse=True)
+    def _init_db(self, isolated, monkeypatch):
+        monkeypatch.setattr(server, "DB_PATH", isolated / "data" / "pomo.db")
+        server.init_db()
+
+    def test_edit_start_and_duration_recomputes_end(self):
+        # Given: a completed session
+        created = server.create_session(
+            kind="pomodoro", start_epoch=int(time.time()) - 3600, duration=1500
+        )
+
+        # When: its start and duration are corrected
+        new_start = int(time.time()) - 7200
+        updated = server.edit_session(
+            created["id"],
+            {"start_epoch": new_start, "duration": 1800},
+        )
+
+        # Then: ended_at follows the new start/duration
+        assert updated["start_epoch"] == new_start
+        assert updated["duration"] == 1800
+        assert updated["ended_at"] == new_start + 1800
+
+    def test_edit_active_timing_is_rejected(self):
+        active = common.new_session("pomodoro", int(time.time()), 1500, "laptop")
+        server.apply_session(active)
+
+        with pytest.raises(ValueError, match="active session"):
+            server.edit_session(active["id"], {"duration": 60})
+
+    def test_edit_active_metadata_is_allowed(self):
+        active = common.new_session("pomodoro", int(time.time()), 1500, "laptop")
+        server.apply_session(active)
+
+        updated = server.edit_session(active["id"], {"name": "renamed", "project": "work"})
+
+        assert updated["name"] == "renamed"
+        assert updated["project"] == "work"
+        assert updated["duration"] == 1500
+
+
+class TestAllTimeQueries:
+    """Dashboard queries can opt out of the default today-only filter."""
+
+    @pytest.fixture(autouse=True)
+    def _init_db(self, isolated, monkeypatch):
+        monkeypatch.setattr(server, "DB_PATH", isolated / "data" / "pomo.db")
+        server.init_db()
+
+    def test_get_sessions_all_time_includes_old_rows(self):
+        now = int(time.time())
+        server.create_session(kind="pomodoro", start_epoch=now - 172800, duration=60)
+        server.create_session(kind="pomodoro", start_epoch=now - 60, duration=60)
+
+        assert len(server.get_sessions()) == 1
+        assert len(server.get_sessions(all_time=True)) == 2
+
+    def test_get_stats_all_time_includes_old_rows(self):
+        now = int(time.time())
+        server.create_session(kind="pomodoro", start_epoch=now - 172800, duration=60)
+        server.create_session(kind="pomodoro", start_epoch=now - 60, duration=60)
+
+        assert server.get_stats()["session_count"] == 1
+        assert server.get_stats(all_time=True)["session_count"] == 2

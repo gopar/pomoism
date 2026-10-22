@@ -1,0 +1,46 @@
+{% extends "web/base.html" %}
+{% load pomo %}
+{% block title %}{% if mode == "create" %}New session{% else %}Edit session{% endif %} · pomo{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">{% if mode == "create" %}New{% else %}Edit{% endif %}</p>
+      <h1>{% if mode == "create" %}New session{% else %}Edit session{% endif %}</h1>
+      {% if session %}
+        <p class="muted">
+          {{ session.id|short_id }} · {{ session.state|state_label }} · {{ session.origin_machine }}
+        </p>
+      {% endif %}
+    </div>
+    <a class="link-button" href="{% url 'session_list' %}">Back to sessions</a>
+  </section>
+
+  {% if active %}
+    <div class="notice">
+      This session is active. Timing is locked; name and project are editable here.
+      Use “Stop session” on the dashboard to end it.
+    </div>
+  {% endif %}
+
+  <form class="panel form-panel" method="post" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <div class="field {% if field.errors %}has-error{% endif %}">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<small class="help">{{ field.help_text }}</small>{% endif %}
+        {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+      </div>
+    {% endfor %}
+
+    <datalist id="project-options">
+      {% for project in projects %}<option value="{{ project }}"></option>{% endfor %}
+    </datalist>
+
+    <div class="form-actions">
+      <button type="submit">{% if mode == "create" %}Create session{% else %}Save changes{% endif %}</button>
+      <a class="link-button" href="{% url 'session_list' %}">Cancel</a>
+    </div>
+  </form>
+{% endblock %}

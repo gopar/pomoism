@@ -13,6 +13,8 @@ one machine and see the countdown and get the overtime warning on another.
   sounds) is an executable script you control. Language-agnostic.
 - **Project tagging** — tag sessions to projects: `pomo 25 -p website`.
   Filter history by project, see everything you've worked on.
+- **Web dashboard** — public stats and session create/edit/archive pages, with
+  a separate login-protected Django admin.
 
 ---
 
@@ -110,6 +112,22 @@ pomo projects --json
 # [{"project": "website"}, {"project": "backend"}, ...]
 ```
 
+### Web dashboard
+
+Open `http://<home-base>:8787/` in a browser.
+
+- `/` — public dashboard: focus/break totals, daily chart, project breakdown,
+  current session, and recent sessions.
+- `/sessions/` — public history with date/project/state filters.
+- `/sessions/new/`, `/sessions/<id>/edit/`, `/sessions/<id>/delete/` — public
+  create/edit/archive pages.
+- `/admin/` — Django admin, **login required**; session data is read-only.
+  Create the first user with `pomo-server createsuperuser`.
+
+The dashboard has no login. Anyone who can reach the server can create, edit,
+or archive sessions, so keep it on a trusted network or behind Tailscale. The
+JSON API still supports optional `POMO_TOKEN` bearer auth.
+
 ### Config
 
 ```sh
@@ -195,6 +213,13 @@ options:
    generated in `~/.config/pomo/django_secret_key`. Set it explicitly if you
    run multiple server instances.
 
+   Static files for the dashboard and admin are collected automatically into
+   `~/.local/share/pomo/static` on startup. To manage the protected admin:
+
+   ```sh
+   pomo-server createsuperuser
+   ```
+
 3. **Every machine — start the agent:**
 
    ```sh
@@ -273,11 +298,13 @@ in `agent.toml`.
 | Server DB      | `~/.local/share/pomo/pomo.db` (`POMO_DB_PATH`) |
 | Django secret  | `POMO_SECRET_KEY` or `~/.config/pomo/django_secret_key` |
 | Allowed hosts  | `POMO_ALLOWED_HOSTS` (default `*`)           |
+| Static files   | `POMO_STATIC_ROOT` (default `~/.local/share/pomo/static`) |
 | Server URL     | `POMO_SERVER_URL` (agent/CLI)                |
 | Bearer token   | `POMO_TOKEN` (server + agents)               |
 | Server bind    | `POMO_HOST` (default `0.0.0.0`)              |
 | Server port    | `POMO_PORT` (default 8787)                   |
 | Auto-migrate   | `POMO_AUTO_MIGRATE` (default `1`)            |
+| Auto-static    | `POMO_AUTO_COLLECTSTATIC` (default `1`)      |
 
 ### Config keys (`agent.toml`)
 
@@ -317,11 +344,12 @@ Auth: optional bearer token via `POMO_TOKEN`.
 
 Three small processes share `pomo/common.py`:
 
-- **`pomo/web/`** — Django HTTP/JSON server. The JSON protocol is unchanged, and
-  the persistence layer is still the stdlib `sqlite3` store in `pomo/server.py`
-  so last-write-wins and the current-pointer race guarantees are preserved.
-  Django also owns migrations and authentication tables. Runs on one home-base
-  machine.
+- **`pomo/web/`** — Django HTTP/JSON server and public dashboard. The JSON
+  protocol is unchanged, and the persistence layer is still the stdlib
+  `sqlite3` store in `pomo/server.py` so last-write-wins and the current-pointer
+  race guarantees are preserved. The public UI has no login; `/admin/` requires
+  Django auth and is read-only for sessions. Django also owns migrations,
+  authentication tables, and static files. Runs on one home-base machine.
 - **`pomo/agent.py`** — per-machine daemon. Polls the server, owns the local
   countdown→overtime timer, fires hooks, flushes the offline outbox.
 - **`pomo/cli.py`** — the CLI. Writes the local cache immediately, pushes to the

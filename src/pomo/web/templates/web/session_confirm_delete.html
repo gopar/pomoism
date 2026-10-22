@@ -1,0 +1,36 @@
+{% extends "web/base.html" %}
+{% load pomo %}
+{% block title %}Archive session · pomo{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Archive</p>
+      <h1>Archive this session?</h1>
+    </div>
+    <a class="link-button" href="{% url 'session_list' %}">Back to sessions</a>
+  </section>
+
+  <section class="panel">
+    <dl class="detail-list">
+      <dt>Started</dt><dd>{{ session.start_epoch|datetime_of }}</dd>
+      <dt>Kind</dt><dd>{{ session.kind|kind_label }}</dd>
+      <dt>Duration</dt><dd>{{ session|session_duration }}</dd>
+      <dt>Project</dt><dd>{{ session.project|default:"—" }}</dd>
+      <dt>Name</dt><dd>{{ session.name|default:"—" }}</dd>
+      <dt>State</dt><dd><span class="badge state-{{ session.state }}">{{ session.state|state_label }}</span></dd>
+    </dl>
+
+    <div class="notice">
+      Archiving hides the session from history and statistics. The audit trail is kept.
+      {% if session.state == "pomodoro" or session.state == "overtime" or session.state == "break" or session.state == "break-overtime" %}
+        This session is current, so archiving it will stop it on all machines.
+      {% endif %}
+    </div>
+
+    <form method="post" class="form-actions">
+      {% csrf_token %}
+      <button class="danger" type="submit">Archive session</button>
+      <a class="link-button" href="{% url 'session_list' %}">Cancel</a>
+    </form>
+  </section>
+{% endblock %}

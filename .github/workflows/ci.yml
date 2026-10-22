@@ -24,6 +24,8 @@ jobs:
         run: pytest -q
       - name: Django system check
         run: POMO_SECRET_KEY=ci python -m django check --settings=pomo.web.settings
+      - name: Collect static files
+        run: POMO_SECRET_KEY=ci POMO_STATIC_ROOT=/tmp/pomo-static python -m django collectstatic --noinput --settings=pomo.web.settings
 
   compile:
     runs-on: ubuntu-latest

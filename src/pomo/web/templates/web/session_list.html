@@ -1,0 +1,65 @@
+{% extends "web/base.html" %}
+{% load pomo %}
+{% block title %}Sessions · pomo{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">History</p>
+      <h1>Sessions</h1>
+      <p class="muted">{{ page_obj.paginator.count }} session{{ page_obj.paginator.count|pluralize }} · {{ filters.label }}</p>
+    </div>
+    <a class="button" href="{% url 'session_create' %}">New session</a>
+  </section>
+
+  <form class="filters" method="get">
+    <label>Range
+      <select name="range">
+        <option value="today" {% if filters.range_key == "today" %}selected{% endif %}>Today</option>
+        <option value="7d" {% if filters.range_key == "7d" %}selected{% endif %}>Last 7 days</option>
+        <option value="30d" {% if filters.range_key == "30d" %}selected{% endif %}>Last 30 days</option>
+        <option value="all" {% if filters.range_key == "all" %}selected{% endif %}>All time</option>
+        <option value="custom" {% if filters.range_key == "custom" %}selected{% endif %}>Custom</option>
+      </select>
+    </label>
+    <label>From <input type="date" name="from" value="{{ filters.from_date }}"></label>
+    <label>To <input type="date" name="to" value="{{ filters.to_date }}"></label>
+    <label>Project
+      <select name="project">
+        <option value="">All projects</option>
+        {% for project in projects %}
+          <option value="{{ project }}" {% if filters.project == project %}selected{% endif %}>{{ project }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>State
+      <select name="state">
+        <option value="">All states</option>
+        {% for value in states %}
+          <option value="{{ value }}" {% if state == value %}selected{% endif %}>{{ value|state_label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="include_archived" value="1" {% if filters.include_archived %}checked{% endif %}>
+      Include archived
+    </label>
+    <button type="submit">Apply</button>
+    <a class="link-button" href="{% url 'session_list' %}">Reset</a>
+  </form>
+
+  <section class="panel">
+    {% include "web/_session_table.html" with sessions=sessions %}
+
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination" aria-label="Pagination">
+        {% if page_obj.has_previous %}
+          <a href="?{% if query_without_page %}{{ query_without_page }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+        {% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a href="?{% if query_without_page %}{{ query_without_page }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

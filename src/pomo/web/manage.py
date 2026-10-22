@@ -26,15 +26,20 @@ def _serve() -> None:
     django.setup()
     if os.environ.get("POMO_AUTO_MIGRATE", "1") != "0":
         call_command("migrate", fake_initial=True, interactive=False, verbosity=1)
+    if os.environ.get("POMO_AUTO_COLLECTSTATIC", "1") != "0":
+        try:
+            call_command("collectstatic", interactive=False, verbosity=0)
+        except Exception as exc:  # noqa: BLE001 - static collection must not block the API
+            sys.stderr.write(f"pomo-server: collectstatic failed: {exc}\n")
 
     host = os.environ.get("POMO_HOST", "0.0.0.0")
     port = int(os.environ.get("POMO_PORT", "8787"))
     db_path = settings.DATABASES["default"]["NAME"]
     sys.stderr.write(f"pomo-server v{common.version()} listening on {host}:{port} (db={db_path})\n")
     if os.environ.get("POMO_TOKEN"):
-        sys.stderr.write("auth: bearer token REQUIRED\n")
+        sys.stderr.write("auth: API bearer token REQUIRED (dashboard remains public)\n")
     else:
-        sys.stderr.write("auth: NONE (network-level only)\n")
+        sys.stderr.write("auth: NONE for dashboard/API (admin requires login)\n")
 
     application = get_wsgi_application()
     with contextlib.suppress(KeyboardInterrupt):

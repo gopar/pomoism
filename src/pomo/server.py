@@ -20,6 +20,7 @@ import os
 import sqlite3
 import sys
 import time
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -152,6 +153,86 @@ def get_current_session() -> dict:
         return _current_session_locked(conn)
 
 
+def get_session(session_id: str) -> dict | None:
+    """Return one session by id, or None if it does not exist."""
+    with contextlib.closing(_connect()) as conn:
+        row = _fetch_session(conn, session_id)
+    return _row_to_session(row) if row is not None else None
+
+
+def create_session(
+    *,
+    kind: str,
+    start_epoch: int,
+    duration: int,
+    name: str | None = None,
+    project: str | None = None,
+    origin_machine: str = "web",
+    state: str = "ended",
+    ended_at: float | None = None,
+) -> dict:
+    """Create a completed session without moving the ``current`` pointer.
+
+    This is intentionally different from :func:`apply_session`: a historical
+    entry added from the web UI must not become the machine-wide current
+    session just because the pointer happened to be empty.
+    """
+    if kind not in ("pomodoro", "break"):
+        raise ValueError(f"invalid kind: {kind!r}")
+    if state not in ("ended", "archived"):
+        raise ValueError(f"invalid state for a completed session: {state!r}")
+    duration = int(duration)
+    if duration <= 0:
+        raise ValueError("duration must be greater than zero")
+    start_epoch = int(start_epoch)
+    ended = start_epoch + duration if ended_at is None else float(ended_at)
+    if ended < start_epoch:
+        raise ValueError("ended_at must not be before start_epoch")
+
+    session = {
+        "id": str(uuid.uuid4()),
+        "state": state,
+        "start_epoch": start_epoch,
+        "duration": duration,
+        "origin_machine": origin_machine,
+        "updated_at": time.time(),
+        "ended_at": ended,
+        "name": name,
+        "project": project,
+        "kind": kind,
+    }
+
+    with contextlib.closing(_connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                "INSERT INTO sessions "
+                "(id, state, start_epoch, duration, origin_machine, "
+                "updated_at, ended_at, name, project, kind) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    session["id"],
+                    session["state"],
+                    session["start_epoch"],
+                    session["duration"],
+                    session["origin_machine"],
+                    session["updated_at"],
+                    session["ended_at"],
+                    session["name"],
+                    session["project"],
+                    session["kind"],
+                ),
+            )
+            _record_history(conn, session)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    sys.stderr.write(f"pomo-server: {common.sid8(session)} created ({session['state']})\n")
+    return session
+
+
 def apply_session(session: dict, force: bool = False) -> tuple[bool, dict]:
     """Insert/replace current session. Returns (True, current_session).
 
@@ -282,6 +363,8 @@ def get_sessions(
     project: str | None = None,
     state: str | None = None,
     include_archived: bool = False,
+    *,
+    all_time: bool = False,
 ) -> list[dict]:
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
@@ -291,13 +374,13 @@ def get_sessions(
         if from_date is not None:
             where.append("date(start_epoch, 'unixepoch', 'localtime') >= ?")
             params.append(from_date)
-        else:
+        elif not all_time:
             where.append("date(start_epoch, 'unixepoch', 'localtime') >= date('now', 'localtime')")
 
         if to_date is not None:
             where.append("date(start_epoch, 'unixepoch', 'localtime') <= ?")
             params.append(to_date)
-        elif from_date is None:
+        elif from_date is None and not all_time:
             where.append("date(start_epoch, 'unixepoch', 'localtime') <= date('now', 'localtime')")
 
         if project is not None:
@@ -340,6 +423,8 @@ def get_stats(
     to_date: str | None = None,
     project: str | None = None,
     include_archived: bool = False,
+    *,
+    all_time: bool = False,
 ) -> dict:
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
@@ -349,13 +434,13 @@ def get_stats(
         if from_date is not None:
             where.append("date(start_epoch, 'unixepoch', 'localtime') >= ?")
             params.append(from_date)
-        else:
+        elif not all_time:
             where.append("date(start_epoch, 'unixepoch', 'localtime') = date('now', 'localtime')")
 
         if to_date is not None:
             where.append("date(start_epoch, 'unixepoch', 'localtime') <= ?")
             params.append(to_date)
-        elif from_date is None:
+        elif from_date is None and not all_time:
             where.append("date(start_epoch, 'unixepoch', 'localtime') <= date('now', 'localtime')")
 
         if project is not None:
@@ -402,7 +487,13 @@ def get_stats(
 
 
 def edit_session(session_id: str, fields: dict) -> dict:
-    """Edit name/project on a session. Returns the updated session dict."""
+    """Edit a session. Active sessions only accept metadata changes.
+
+    Always stamps ``updated_at`` server-side and appends a history row. Timing
+    fields are accepted for completed/archived sessions; changing the start or
+    duration recomputes ``ended_at`` unless an explicit end is supplied.
+    """
+    timing_keys = {"start_epoch", "duration", "kind", "ended_at"}
     with contextlib.closing(_connect()) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
@@ -413,13 +504,51 @@ def edit_session(session_id: str, fields: dict) -> dict:
                 raise LookupError(f"session {session_id!r} not found")
 
             session = _row_to_session(row)
+            if session["state"] in common.ACTIVE_STATES and timing_keys & fields.keys():
+                conn.execute("ROLLBACK")
+                raise ValueError("cannot edit the timing of an active session")
+
             name = fields.get("name") if "name" in fields else session["name"]
             project = fields.get("project") if "project" in fields else session["project"]
-            new_updated_at = time.time()
+            start_epoch = (
+                int(fields["start_epoch"])
+                if "start_epoch" in fields
+                else int(session["start_epoch"])
+            )
+            duration = int(fields["duration"]) if "duration" in fields else int(session["duration"])
+            if duration <= 0:
+                conn.execute("ROLLBACK")
+                raise ValueError("duration must be greater than zero")
 
+            kind = fields.get("kind") if "kind" in fields else session["kind"]
+            if kind not in (None, "pomodoro", "break"):
+                conn.execute("ROLLBACK")
+                raise ValueError(f"invalid kind: {kind!r}")
+
+            if fields.get("ended_at") is not None:
+                ended_at: float | None = float(fields["ended_at"])
+            elif "start_epoch" in fields or "duration" in fields:
+                ended_at = float(start_epoch + duration)
+            else:
+                ended_at = session["ended_at"]
+            if ended_at is not None and ended_at < start_epoch:
+                conn.execute("ROLLBACK")
+                raise ValueError("ended_at must not be before start_epoch")
+
+            new_updated_at = time.time()
             conn.execute(
-                "UPDATE sessions SET name = ?, project = ?, updated_at = ? WHERE id = ?",
-                (name, project, new_updated_at, session_id),
+                "UPDATE sessions SET name = ?, project = ?, start_epoch = ?, "
+                "duration = ?, kind = ?, ended_at = ?, updated_at = ? WHERE id = ?",
+                (
+                    name,
+                    project,
+                    start_epoch,
+                    duration,
+                    kind,
+                    ended_at,
+                    new_updated_at,
+                    session_id,
+                ),
             )
             srow = _fetch_session(conn, session_id)
             # Unreachable in practice: the row exists within this transaction.

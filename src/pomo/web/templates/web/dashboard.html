@@ -1,0 +1,141 @@
+{% extends "web/base.html" %}
+{% load pomo %}
+{% block title %}Dashboard · pomo{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <p class="eyebrow">Public dashboard</p>
+      <h1>Pomodoro activity</h1>
+      <p class="muted">{{ filters.label }} · {{ stats.focus_count }} completed pomodoros</p>
+    </div>
+    <a class="button" href="{% url 'session_create' %}">New session</a>
+  </section>
+
+  <form class="filters" method="get">
+    <label>Range
+      <select name="range">
+        <option value="today" {% if filters.range_key == "today" %}selected{% endif %}>Today</option>
+        <option value="7d" {% if filters.range_key == "7d" %}selected{% endif %}>Last 7 days</option>
+        <option value="30d" {% if filters.range_key == "30d" %}selected{% endif %}>Last 30 days</option>
+        <option value="all" {% if filters.range_key == "all" %}selected{% endif %}>All time</option>
+        <option value="custom" {% if filters.range_key == "custom" %}selected{% endif %}>Custom</option>
+      </select>
+    </label>
+    <label>From <input type="date" name="from" value="{{ filters.from_date }}"></label>
+    <label>To <input type="date" name="to" value="{{ filters.to_date }}"></label>
+    <label>Project
+      <select name="project">
+        <option value="">All projects</option>
+        {% for project in projects %}
+          <option value="{{ project }}" {% if filters.project == project %}selected{% endif %}>{{ project }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="include_archived" value="1" {% if filters.include_archived %}checked{% endif %}>
+      Include archived
+    </label>
+    <button type="submit">Apply</button>
+    <a class="link-button" href="{% url 'dashboard' %}">Reset</a>
+  </form>
+
+  <section class="current-banner {% if current_active %}active{% endif %}">
+    {% if current_active %}
+      <div class="current-main">
+        <span class="badge state-{{ current_state }}">{{ current_state|state_label }}</span>
+        <strong>{{ current_remaining|clock }}</strong>
+        <span class="muted">{% if current_overtime %}overtime{% else %}remaining{% endif %}</span>
+        {% if current.project %}<span class="tag">{{ current.project }}</span>{% endif %}
+        {% if current.name %}<span class="tag">{{ current.name }}</span>{% endif %}
+      </div>
+      <form method="post" action="{% url 'end_current_session' %}">
+        {% csrf_token %}
+        <button class="danger" type="submit">Stop session</button>
+      </form>
+    {% else %}
+      <div class="current-main">
+        <span class="badge state-idle">Idle</span>
+        <span class="muted">No active session.</span>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="cards">
+    <article class="card">
+      <span class="card-label">Focus time</span>
+      <strong>{{ stats.focus_seconds|duration }}</strong>
+      <small>{{ stats.focus_count }} pomodoro{{ stats.focus_count|pluralize }}</small>
+    </article>
+    <article class="card">
+      <span class="card-label">Break time</span>
+      <strong>{{ stats.break_seconds|duration }}</strong>
+      <small>{{ stats.break_count }} break{{ stats.break_count|pluralize }}</small>
+    </article>
+    <article class="card">
+      <span class="card-label">Average focus</span>
+      <strong>{{ stats.average_focus_seconds|duration }}</strong>
+      <small>per completed pomodoro</small>
+    </article>
+    <article class="card">
+      <span class="card-label">Top project</span>
+      <strong>{% if stats.top_project %}{{ stats.top_project.name }}{% else %}—{% endif %}</strong>
+      <small>{% if stats.top_project %}{{ stats.top_project.seconds|duration }} · {{ stats.top_project.count }} session{{ stats.top_project.count|pluralize }}{% else %}No project data{% endif %}</small>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Daily activity</h2>
+      <span class="legend"><span class="legend-dot focus"></span>Focus <span class="legend-dot break"></span>Break</span>
+    </div>
+    {% if stats.chart_max %}
+      <div class="chart" aria-label="Daily focus and break time">
+        {% for day in stats.daily %}
+          <div class="chart-col">
+            <div class="chart-bars">
+              <span class="bar focus" style="height: {{ day.focus_pct }}%" title="{{ day.date }}: {{ day.focus_seconds|duration }} focus"></span>
+              <span class="bar break" style="height: {{ day.break_pct }}%" title="{{ day.date }}: {{ day.break_seconds|duration }} break"></span>
+            </div>
+            <span class="chart-label">{{ day.date|slice:"5:" }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No completed sessions in this range.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>By project</h2>
+    </div>
+    {% if stats.projects %}
+      <table class="data-table compact">
+        <thead><tr><th>Project</th><th>Sessions</th><th>Focus time</th></tr></thead>
+        <tbody>
+          {% for project, data in stats.projects.items %}
+            <tr>
+              <td>{{ project }}</td>
+              <td>{{ data.count }}</td>
+              <td>{{ data.seconds|duration }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No project-tagged sessions in this range.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Recent sessions</h2>
+      {% if filters.all_time %}
+        <a href="{% url 'session_list' %}?range=all{% if filters.project %}&amp;project={{ filters.project|urlencode }}{% endif %}{% if filters.include_archived %}&amp;include_archived=1{% endif %}">View all</a>
+      {% else %}
+        <a href="{% url 'session_list' %}?from={{ filters.from_date }}&amp;to={{ filters.to_date }}{% if filters.project %}&amp;project={{ filters.project|urlencode }}{% endif %}{% if filters.include_archived %}&amp;include_archived=1{% endif %}">View all</a>
+      {% endif %}
+    </div>
+    {% include "web/_session_table.html" with sessions=recent %}
+  </section>
+{% endblock %}

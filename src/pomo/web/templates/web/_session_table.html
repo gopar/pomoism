@@ -1,0 +1,44 @@
+{% load pomo %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Start</th>
+      <th>End</th>
+      <th>Kind</th>
+      <th>Duration</th>
+      <th>Project</th>
+      <th>Name</th>
+      <th>State</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for session in sessions %}
+      <tr>
+        <td>{{ session.start_epoch|date_of }}</td>
+        <td>{{ session.start_epoch|time_of }}</td>
+        <td>
+          {% if session.ended_at %}
+            {{ session.ended_at|time_of }}
+          {% else %}
+            <span class="muted">running</span>
+          {% endif %}
+        </td>
+        <td>{{ session.kind|kind_label }}</td>
+        <td>{{ session|session_duration }}</td>
+        <td>{{ session.project|default:"—" }}</td>
+        <td>{{ session.name|default:"—" }}</td>
+        <td><span class="badge state-{{ session.state }}">{{ session.state|state_label }}</span></td>
+        <td class="actions">
+          <a href="{% url 'session_edit' session.id %}">Edit</a>
+          {% if session.state != "archived" %}
+            <a class="danger" href="{% url 'session_delete' session.id %}">Archive</a>
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9" class="empty">No sessions in this range.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

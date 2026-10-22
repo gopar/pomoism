@@ -12,19 +12,23 @@ by a test, run the processes directly (see below).
 Side effects (`shortcuts`, `say`, `afplay`, Emacs) are macOS-specific.
 
 CI (`.github/workflows/ci.yml`) runs the pytest suite on Python 3.11–3.14,
-a Django system check, ruff lint/format, ty, and a `compileall` syntax gate
-(Ubuntu).
+a Django system check, `collectstatic`, ruff lint/format, ty, and a
+`compileall` syntax gate (Ubuntu).
 
 ## Architecture (3 processes in the `pomo` package)
 
-- `pomo/web/` — Django HTTP/JSON server. It exposes the legacy API paths plus
-  `/api/` aliases. The persistence layer is the stdlib `sqlite3` store in
-  `pomo/server.py` (last-write-wins), deliberately kept raw so its
-  `BEGIN IMMEDIATE` race guarantees survive. Django owns migrations and auth
-  tables. One instance on a "home-base" machine. Endpoints: `GET /health`,
+- `pomo/web/` — Django HTTP/JSON server plus the public dashboard. It exposes
+  the legacy API paths plus `/api/` aliases. The persistence layer is the
+  stdlib `sqlite3` store in `pomo/server.py` (last-write-wins), deliberately
+  kept raw so its `BEGIN IMMEDIATE` race guarantees survive. Django owns
+  migrations, auth tables, static files, and the read-only authenticated admin.
+  One instance on a "home-base" machine. API endpoints: `GET /health`,
   `GET /version`, `GET /current`, `GET /sessions` (optional `?project=`,
   `?from=`, `?to=`, `?state=`), `GET /projects`, `GET /stats`, `POST /sessions`,
   `POST /sessions/end`, `PATCH /sessions/<id>`, `POST /sessions/<id>/archive`.
+  Public UI: `/`, `/sessions/`, `/sessions/new/`, `/sessions/<id>/edit/`,
+  `/sessions/<id>/delete/`. Admin: `/admin/` (login required, session data is
+  read-only).
 - `pomo/agent.py` — per-machine daemon. Polls `/current`, owns the countdown→overtime
   timer, fires side effects, flushes the offline outbox.
 - `pomo/cli.py` — the CLI (`pomo start <min>`, `pomo break <min>`, `pomo clear`). Writes the
@@ -47,9 +51,13 @@ Django management commands (`pomo-server migrate`, `createsuperuser`, ...).
   explicit stop always wins even against a clock-skewed client.
 - **All session writes go through `pomo/server.py`**: Django views may read
   through the ORM, but session mutations must call the store functions
-  (`apply_session`, `end_current`, `edit_session`, `archive_session`) so LWW,
-  history, and the `current` pointer stay correct. Do not write `Session` rows
-  from Django forms/admin.
+  (`apply_session`, `end_current`, `edit_session`, `archive_session`,
+  `create_session`) so LWW, history, and the `current` pointer stay correct.
+  Do not write `Session` rows from Django forms/admin. `create_session` is the
+  historical-entry path and deliberately does not move `current`.
+- **Public dashboard, protected admin**: public UI views must not use
+  `login_required` or `LoginRequiredMiddleware`. Only `/admin/` is
+  authenticated, and its session models are read-only.
 - **`ended`/`archived` are terminal**: `apply_session` rejects non-terminal writes
   for a row already `ended`/`archived` — a just-woken machine's late overtime push
   must not resurrect a finished session.
@@ -90,10 +98,12 @@ Django management commands (`pomo-server migrate`, `createsuperuser`, ...).
 - Env overrides: `POMO_SERVER_URL` (agent/CLI), `POMO_TOKEN` (bearer auth, both
   ends), `POMO_PORT`/`POMO_HOST`/`POMO_DB_PATH` (server),
   `POMO_SECRET_KEY`/`POMO_SECRET_KEY_FILE`, `POMO_ALLOWED_HOSTS`,
-  `POMO_DEBUG`, `POMO_TIME_ZONE`, `POMO_CSRF_TRUSTED_ORIGINS`, and
-  `POMO_AUTO_MIGRATE` (Django server).
+  `POMO_DEBUG`, `POMO_TIME_ZONE`, `POMO_CSRF_TRUSTED_ORIGINS`,
+  `POMO_STATIC_ROOT`/`POMO_AUTO_COLLECTSTATIC`, and `POMO_AUTO_MIGRATE`
+  (Django server).
 - Paths in `pomo/common.py`: cache `~/.cache/pomo/`, DB `~/.local/share/pomo/pomo.db`,
-  generated Django secret `~/.config/pomo/django_secret_key`.
+  generated Django secret `~/.config/pomo/django_secret_key`, collected static
+  `~/.local/share/pomo/static`.
 - Migrations: `pomo/web/migrations/0001_initial.py` must keep matching the
   legacy `sessions`/`current` tables so `migrate --fake-initial` can adopt an
   existing DB. Index/history migration operations must be idempotent because
@@ -108,6 +118,10 @@ Django management commands (`pomo-server migrate`, `createsuperuser`, ...).
   never touch real `~`.
 - API tests use the Django test client against the raw store; keep
   `tests/test_server.py` as the coverage for LWW/concurrency invariants.
+- UI/admin tests: public dashboard views must remain reachable anonymously;
+  `/admin/` must redirect anonymous users to login. Admin session models are
+  read-only. Stats aggregation is tested as pure functions in
+  `tests/test_web_stats.py`.
 - When adding tests use Gherkin style comments (Given, When, Then, etc)
 
 ## Pre-commit hooks
@@ -154,6 +168,8 @@ code. When you add, change, or remove any of these, update `README.md`:
 - **Hook environment variables** — caught by `test_build_env_has_expected_pomo_keys`
   in `tests/test_hooks.py` (CI fails on mismatch)
 - **Server API endpoints** — no automated check; update manually
+- **Public UI routes and admin access** — update manually; public views must
+  stay anonymous and `/admin/` must stay login-protected
 
 ## Versioning
 

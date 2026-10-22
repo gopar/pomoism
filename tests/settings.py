@@ -24,3 +24,5 @@ else:
     os.environ["POMO_DB_PATH"] = _previous_db_path
 
 DATABASES["default"]["TEST"] = {"NAME": str(_test_root / "test.db")}  # noqa: F405
+STATIC_ROOT = _test_root / "static"  # noqa: F405
+STATIC_ROOT.mkdir(parents=True, exist_ok=True)  # noqa: F405
